@@ -1,5 +1,12 @@
 [
     {
+        "timestamp": "2025-12-15 13:03:17",
+        "cidr": "10.0.0.0/24",
+        "active_count": 7,
+        "duration": 16.26,
+        "total_scanned": 254
+    },
+    {
         "timestamp": "2025-12-15 12:42:05",
         "cidr": "10.0.0.0/24",
         "active_count": 6,

@@ -54,5 +54,13 @@
         "vendor": "Private/Randomized Device",
         "port_80": false,
         "ping": true
+    },
+    {
+        "ip": "10.0.0.45",
+        "hostname": "Unknown",
+        "mac": "0e:79:84:0b:f1:ee",
+        "vendor": "Private/Randomized Device",
+        "port_80": false,
+        "ping": true
     }
 ]

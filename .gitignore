@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+# Data files - generally better to ignore local run data, but keeping example Jsons if user wants them.
+# The user wants to push "the app", so usually we ignore dynamic data. 
+# However, usually we might want to keep the structure. 
+# For now, I'll ignore the specific large results but keep the history files if they are small or just let them be untracked if they are purely local data.
+# Actually, standard practice for this kind of app is to ignore the data files.
+
+scan_results.json
+scan_history.json
+ssl_results.json
+config_history.json
