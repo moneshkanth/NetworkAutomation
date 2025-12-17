@@ -8,17 +8,34 @@ import os
 import sys
 
 def check_port_80(ip):
-    """Checks if port 80 is open on the given IP."""
+    """
+    Checks if port 80 is open on the given IP.
+    
+    Args:
+        ip (str): The IP address to check.
+        
+    Returns:
+        bool: True if port 80 is open, False otherwise.
+    """
     try:
+        # Create a socket object
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1)
+            s.settimeout(1) # Set timeout to 1 second
             result = s.connect_ex((str(ip), 80))
-            return result == 0
+            return result == 0 # result 0 means success
     except Exception:
         return False
 
 def check_ping(ip):
-    """Checks if the IP responds to ICMP ping."""
+    """
+    Checks if the IP responds to ICMP ping.
+    
+    Args:
+        ip (str): The IP address to ping.
+        
+    Returns:
+        bool: True if the host responds to ping, False otherwise.
+    """
     # Option '-c' for count (1 packet), '-W' for timeout (1000ms) on Mac/Linux
     try:
         # Check platform to adjust ping arguments slightly if needed, but -c and -W are fairly standard on *nix/mac
@@ -41,7 +58,15 @@ import time
 vendor_lock = threading.Lock()
 
 def get_mac_address(ip):
-    """Retrieves the MAC address for an IP using the ARP table."""
+    """
+    Retrieves the MAC address for an IP using the ARP table.
+    
+    Args:
+        ip (str): The IP address to resolve.
+        
+    Returns:
+        str: The MAC address if found, None otherwise.
+    """
     try:
         # distinct command for MacOS/Linux vs Windows could be needed, but 'arp -n <ip>' usually works on *nix
         output = subprocess.check_output(['arp', '-n', str(ip)], timeout=2).decode()
@@ -63,7 +88,15 @@ def get_mac_address(ip):
         return None
 
 def is_private_mac(mac):
-    """Checks if a MAC address is locally administered (randomized)."""
+    """
+    Checks if a MAC address is locally administered (randomized).
+    
+    Args:
+        mac (str): The MAC address to check.
+        
+    Returns:
+        bool: True if the MAC is private/randomized, False otherwise.
+    """
     try:
         first_byte = int(mac.split(":")[0], 16)
         # Check 2nd least significant bit of 1st byte (x2, x6, xA, xE)
@@ -72,7 +105,15 @@ def is_private_mac(mac):
         return False
 
 def get_vendor(mac):
-    """Retrieves device vendor using macvendors.com API with rate limiting."""
+    """
+    Retrieves device vendor using macvendors.com API with rate limiting.
+    
+    Args:
+        mac (str): The MAC address to lookup.
+        
+    Returns:
+        str: The vendor name or "Unknown"/"Vendor Not Found".
+    """
     if not mac:
         return "Unknown"
     
@@ -97,7 +138,15 @@ def get_vendor(mac):
             return "Unknown"
 
 def get_hostname(ip):
-    """Resolves hostname for an IP address."""
+    """
+    Resolves hostname for an IP address.
+    
+    Args:
+        ip (str): The IP address to resolve.
+        
+    Returns:
+        str: The resolved hostname or "Unknown" if resolution fails.
+    """
     try:
         # 1-second timeout for resolution
         hostname, _, _ = socket.gethostbyaddr(str(ip))
@@ -106,7 +155,15 @@ def get_hostname(ip):
         return "Unknown"
 
 def scan_ip(ip):
-    """Scans a single IP for Port 80 and Ping."""
+    """
+    Scans a single IP for Port 80 and Ping.
+    
+    Args:
+        ip (str): The IP address to scan.
+        
+    Returns:
+        dict: A dictionary containing scan results (ip, hostname, mac, vendor, port_80, ping) if active, None otherwise.
+    """
     is_active = False
     port_80_open = check_port_80(ip)
     ping_responsive = check_ping(ip)
@@ -131,7 +188,15 @@ def scan_ip(ip):
 def scan_network(cidr, threads=50, status_callback=None, progress_callback=None):
     """
     Scans a CIDR block for active hosts.
-    Returns a tuple: (active_hosts_list, statistics_dict)
+    
+    Args:
+        cidr (str): The CIDR block to scan (e.g., "192.168.1.0/24").
+        threads (int): The number of concurrent threads to use.
+        status_callback (function): Optional callback for status messages.
+        progress_callback (function): Optional callback for progress updates (current, total).
+        
+    Returns:
+        tuple: (active_hosts_list, statistics_dict)
     """
     try:
         network = ipaddress.ip_network(cidr, strict=False)
@@ -195,6 +260,9 @@ def scan_network(cidr, threads=50, status_callback=None, progress_callback=None)
     return active_hosts, stats
 
 def main():
+    """
+    Main entry point for command-line usage.
+    """
     parser = argparse.ArgumentParser(description="Scan a CIDR block for active IPs (Port 80/Ping).")
     parser.add_argument("cidr", help="CIDR block to scan (e.g., 192.168.1.0/24)")
     parser.add_argument("-o", "--output", default="scan_results.json", help="Output JSON file name")
@@ -202,7 +270,7 @@ def main():
 
     args = parser.parse_args()
 
-    active_hosts = scan_network(args.cidr, args.threads)
+    active_hosts, stats = scan_network(args.cidr, args.threads)
     
     try:
         with open(args.output, 'w') as f:

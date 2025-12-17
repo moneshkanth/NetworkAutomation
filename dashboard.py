@@ -11,6 +11,12 @@ import datetime
 
 # Metric Tiles Layout
 def display_metrics(df):
+    """
+    Displays key metrics for the network scan in a 3-column layout.
+    
+    Args:
+        df (pd.DataFrame): The scan results data.
+    """
     total_active = len(df)
     port_80_open = df['port_80'].sum() if 'port_80' in df.columns else 0
     ping_responsive = df['ping'].sum() if 'ping' in df.columns else 0
@@ -21,6 +27,12 @@ def display_metrics(df):
     col3.metric("Ping Responsive", ping_responsive)
 
 def load_data():
+    """
+    Loads scan results from `scan_results.json`.
+    
+    Returns:
+        pd.DataFrame: A DataFrame containing scan results or an empty structure if not found.
+    """
     file_path = "scan_results.json"
     if os.path.exists(file_path):
         try:
@@ -68,6 +80,12 @@ def append_history(scan_stats, cidr):
         json.dump(history_data, f, indent=4)
 
 def load_history():
+    """
+    Loads scan history from `scan_history.json`.
+    
+    Returns:
+        list: A list of scan history entries.
+    """
     history_file = "scan_history.json"
     if os.path.exists(history_file):
         try:
@@ -87,17 +105,20 @@ def is_private_cidr(cidr):
         return False
 
 import pandas as pd # Ensure pandas is available or use existing import
-from ssl_checker import check_bulk_ssl
 from config_diff import generate_diff, generate_html_diff
+from ssl_checker import check_bulk_ssl
+from dns_propagator import check_dns_propagation
+from subnet_calculator import calculate_subnet_details
+from latency_analyzer import analyze_latency
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
     history_file = "config_history.json"
     entry = {
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "old": old_cfg,
-        "new": new_cfg,
-        "preview": f"Diff @ {datetime.datetime.now().strftime('%H:%M:%S')}"
+         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+         "old": old_cfg,
+         "new": new_cfg,
+         "preview": f"Diff @ {datetime.datetime.now().strftime('%H:%M:%S')}"
     }
     
     history_data = []
@@ -204,7 +225,61 @@ def render_config_comparator():
             else:
                 st.success("Configs are identical!")
 
+def render_dns_propagator():
+    """
+    Renders the Global DNS Propagator view.
+    """
+    # Sidebar navigation
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Querying: Google (8.8.8.8), Cloudflare (1.1.1.1), Quad9 (9.9.9.9), OpenDNS (208.67.222.222)")
+
+    st.title("🌍 Global DNS Propagator")
+    st.markdown("Verify if your domain resolves correctly across different global providers.")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        domain = st.text_input("Domain Name", "microsoft.com")
+    with col2:
+        record_type = st.selectbox("Record Type", ["A", "AAAA", "MX", "CNAME", "TXT", "NS"])
+        
+    if st.button("Check Propagation"):
+        if not domain:
+            st.warning("Please enter a domain.")
+        else:
+            with st.spinner(f"Querying global resolvers for {domain} ({record_type})..."):
+                results = check_dns_propagation(domain, record_type)
+                
+                df = pd.DataFrame(results)
+                
+                # Check consistency
+                # A simple consistency check: are all statuses '✅'?
+                # Or do all Results match? (Result strings might vary slightly due to ordering, so let's stick to status for now or simple set check)
+                
+                # Check if all statuses are Check Mark
+                all_success = all(r['Status'] == '✅' for r in results)
+                
+                # Check for result consistency (unique set of results for success entries)
+                success_results = [r['Result'] for r in results if r['Status'] == '✅']
+                unique_answers = list(set(success_results))
+                is_consistent = len(unique_answers) == 1 if success_results else False
+                
+                if all_success and is_consistent:
+                    st.success("✅ Global Consistency Verified: All resolvers returned the same result.")
+                elif all_success and not is_consistent:
+                    st.warning("⚠️ Inconsistent Results: Providers returned different records (Propagation might be in progress).")
+                else:
+                    st.error("❌ Propagation Issues: Some providers failed or timed out.")
+                
+                st.dataframe(df, use_container_width=True)
+
 def render_ssl_inspector():
+    """
+    Renders the SSL Inspector view, including domain input and bulk checking logic.
+    """
     # Sidebar navigation
     with st.sidebar:
         if st.button("← Back to Home"):
@@ -265,41 +340,183 @@ def render_ssl_inspector():
         st.info("No previous SSL scan results found. Run a check to see data.")
 
 
+def render_subnet_calculator():
+    """
+    Renders the IP Subnet Calculator view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Calculate valid host ranges, broadcast addresses, and masks.")
+
+    st.title("🔢 IP Subnet Visualizer")
+    st.markdown("Calculate network boundaries and valid host ranges.")
+
+    cidr_input = st.text_input("Enter CIDR Block", "10.0.0.0/22")
+
+    if cidr_input:
+        details = calculate_subnet_details(cidr_input)
+        
+        if details and "Error" not in details:
+            st.success("Valid Subnet Configuration")
+            st.divider()
+            
+            # 2-Column Layout
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"**CIDR:** `{details['CIDR']}`")
+                st.markdown(f"**Netmask:** `{details['Netmask']}`")
+                st.markdown(f"**Wildcard Mask:** `{details['Wildcard Mask']}`")
+                st.markdown(f"**Total Usable Hosts:** `{details['Total Usable Hosts']}`")
+                
+            with col2:
+                st.markdown(f"**Network Address:** `{details['Network Address']}`")
+                st.markdown(f"**Broadcast Address:** `{details['Broadcast Address']}`")
+                st.markdown(f"**First Usable IP:** `{details['First Usable IP']}`")
+                st.markdown(f"**Last Usable IP:** `{details['Last Usable IP']}`")
+                
+        elif details and "Error" in details:
+             st.error(f"Invalid Subnet Format: {details['Error']}")
+        else:
+             st.error("Invalid Subnet Format")
+
+def render_latency_analyzer():
+    """
+    Renders the HTTP Latency Analyzer view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Break down request timing into DNS, Connect, TTFB, and Transfer phases.")
+
+    st.title("⏱️ HTTP Latency Analyzer")
+    st.markdown("Analyze website performance and identify bottlenecks (TTFB).")
+    
+    url = st.text_input("Target URL", "https://www.google.com")
+    
+    if st.button("Analyze Latency"):
+        if not url:
+            st.warning("Please enter a URL.")
+        else:
+            with st.spinner(f"Measuring latency for {url}..."):
+                metrics = analyze_latency(url)
+                
+                if metrics.get("Error"):
+                    st.error(metrics["Error"])
+                else:
+                    # Metrics Row
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("DNS Lookup", f"{metrics['DNS Lookup']:.4f}s")
+                    c2.metric("TCP Connect", f"{metrics['TCP Connection']:.4f}s")
+                    c3.metric("TTFB", f"{metrics['TTFB']:.4f}s")
+                    c4.metric("Download", f"{metrics['Content Download']:.4f}s")
+                    
+                    st.divider()
+                    
+                    # Total Time Alert
+                    total_time = metrics['Total Time']
+                    if total_time > 1.0:
+                        st.warning(f"⚠️ High Latency Detected: Total Time {total_time:.4f}s (> 1.0s)")
+                    else:
+                        st.success(f"✅ Performance Optimal: Total Time {total_time:.4f}s")
+                        
+                    # Visualization
+                    st.subheader("Latency Breakdown")
+                    chart_data = pd.DataFrame({
+                        "Phase": ["DNS Lookup", "TCP Connect", "TTFB", "Download"],
+                        "Time (s)": [
+                            metrics['DNS Lookup'],
+                            metrics['TCP Connection'],
+                            metrics['TTFB'],
+                            metrics['Content Download']
+                        ]
+                    })
+                    st.bar_chart(chart_data.set_index("Phase"), color="#FF4B4B")
+
 def render_home():
+    """
+    Renders the Home page with service tiles for navigation.
+    """
     st.title("Network Automation Portal")
     st.markdown("Welcome to your central hub for network operations.")
     st.divider()
     
-    col1, col2, col3 = st.columns(3)
+    # Row 1: 5 Columns
+    cols = st.columns(5)
     
-    with col1:
+    # 1. Network Scanner
+    with cols[0]:
         with st.container(border=True):
             st.write("📡")
             st.subheader("Network Scanner")
-            st.write("Discovery active devices, resolving hostnames, and identifying vendors on your local subnets.")
+            st.write("Scan subnets to find devices, hostnames, and vendors.")
             if st.button("Launch Scanner", key="btn_launch_scanner", use_container_width=True):
                 st.session_state['current_view'] = 'scanner'
                 st.rerun()
 
-    with col2:
+    # 2. SSL Inspector
+    with cols[1]:
         with st.container(border=True):
             st.write("🔐")
             st.subheader("SSL Inspector")
-            st.write("Bulk check SSL certificates for expiry dates and validity.")
+            st.write("Check bulk SSL certificates for expiry and validity.")
             if st.button("Launch Inspector", key="btn_launch_ssl", use_container_width=True):
                  st.session_state['current_view'] = 'ssl_inspector'
                  st.rerun()
 
-    with col3:
+    # 3. Config Diff
+    with cols[2]:
         with st.container(border=True):
             st.write("⚖️")
             st.subheader("Config Diff")
-            st.write("Compare network configurations side-by-side with diff highlighting.")
+            st.write("Compare configurations with side-by-side highlighting.")
             if st.button("Launch Comparator", key="btn_launch_diff", use_container_width=True):
                 st.session_state['current_view'] = 'config_diff'
                 st.rerun()
 
+    # 4. Global DNS
+    with cols[3]:
+        with st.container(border=True):
+            st.write("🌍")
+            st.subheader("Global DNS")
+            st.write("Check propagation across Google, Cloudflare, and Quad9.")
+            if st.button("Launch DNS Checker", key="btn_launch_dns", use_container_width=True):
+                st.session_state['current_view'] = 'dns_propagator'
+                st.rerun()
+
+    # 5. Subnet Calc
+    with cols[4]:
+        with st.container(border=True):
+            st.write("🔢")
+            st.subheader("Subnet Calc")
+            st.write("Calculate CIDR masks, broadcast, and IP address ranges.")
+            if st.button("Launch Calculator", key="btn_launch_subnet", use_container_width=True):
+                st.session_state['current_view'] = 'subnet_calc'
+                st.rerun()
+
+    # Row 2: 5 Columns (to keep width consistent)
+    st.write("") # Spacer
+    cols_row2 = st.columns(5)
+    
+    # 6. Latency Analyzer (First column of second row)
+    with cols_row2[0]:
+        with st.container(border=True):
+            st.write("⏱️")
+            st.subheader("Latency Analyzer")
+            st.write("Analyze DNS, TCP connect, TTFB, and download timings.")
+            if st.button("Launch Analyzer", key="btn_launch_latency", use_container_width=True):
+                st.session_state['current_view'] = 'latency_analyzer'
+                st.rerun()
+
 def render_network_scanner():
+    """
+    Renders the Network Scanner view, including sidebar controls, scanning logic, and results display.
+    """
     # Sidebar for Scanning
     with st.sidebar:
         if st.button("← Back to Home"):
@@ -483,3 +700,9 @@ elif st.session_state['current_view'] == 'ssl_inspector':
     render_ssl_inspector()
 elif st.session_state['current_view'] == 'config_diff':
     render_config_comparator()
+elif st.session_state['current_view'] == 'dns_propagator':
+    render_dns_propagator()
+elif st.session_state['current_view'] == 'subnet_calc':
+    render_subnet_calculator()
+elif st.session_state['current_view'] == 'latency_analyzer':
+    render_latency_analyzer()

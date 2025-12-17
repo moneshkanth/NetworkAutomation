@@ -5,7 +5,17 @@ import datetime
 def get_ssl_expiry(hostname):
     """
     Connects to the host and retrieves SSL certificate expiry date.
-    Returns a dictionary with status and details.
+    
+    Args:
+        hostname (str): The hostname to check (e.g., "google.com").
+        
+    Returns:
+        dict: A dictionary containing:
+            - host: The hostname checked.
+            - status: "Valid", "Certificate Error", "Timeout", or error message.
+            - days_remaining: Number of days until expiration (or -1 on error).
+            - expires_on: Expiration date string (YYYY-MM-DD).
+            - issuer: The Common Name (CN) of the certificate issuer.
     """
     ssl_date_fmt = r'%b %d %H:%M:%S %Y %Z'
     context = ssl.create_default_context()
@@ -42,7 +52,15 @@ def get_ssl_expiry(hostname):
         conn.close()
 
 def check_bulk_ssl(hosts):
-    """Checks a list of hosts."""
+    """
+    Checks a list of hosts for SSL expiry.
+    
+    Args:
+        hosts (list): A list of hostname strings.
+        
+    Returns:
+        list: A list of dictionaries with result details for each host.
+    """
     results = []
     for host in hosts:
         host = host.strip()
