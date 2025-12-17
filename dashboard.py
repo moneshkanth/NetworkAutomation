@@ -110,6 +110,7 @@ from ssl_checker import check_bulk_ssl
 from dns_propagator import check_dns_propagation
 from subnet_calculator import calculate_subnet_details
 from latency_analyzer import analyze_latency
+from ai_assistant import get_ai_response
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
@@ -643,7 +644,10 @@ def render_network_scanner():
             st.rerun()
         except Exception as e:
             st.error(f"Error clearing history: {e}")
+            
+    df = load_data()
 
+    # Load data for display
     df = load_data()
 
     # Scan Summary Block
@@ -655,54 +659,152 @@ def render_network_scanner():
         s2.metric("Duration", f"{stats.get('duration', 0):.2f}s")
         
         rate = stats.get('total_scanned', 0) / (stats.get('duration', 1) or 1)
-        s3.metric("Rate", f"{rate:.1f} IP/s")
-        s4.metric("Active Found", stats.get('active_count', 0))
-        s5.metric("Errors", stats.get('errors', 0))
-        st.divider()
+        s3.metric("Rate (IPs/s)", f"{rate:.2f}")
+        s4.metric("Active Hosts", stats.get('active_count', 0))
+        s5.metric("Timeouts", stats.get('timeouts', 0))
 
+    st.divider()
+
+    # Results Table
+    st.subheader("Active Hosts Found")
+    
     if not df.empty:
         display_metrics(df)
-        
-        st.markdown("### Scan Results")
         
         # Demo Mode Masking
         display_df = df.copy()
         if demo_mode: # Using the demo_mode checkbox from the sidebar
-            # Mask IP: 192.168.1.5 -> 192.168.1.***
-            display_df['ip'] = display_df['ip'].apply(lambda x: '.'.join(x.split('.')[:3]) + '.***')
-            # Mask MAC: 00:11:22:33:44:55 -> 00:11:22:**:**:**
+            display_df['ip'] = display_df['ip'].apply(lambda x: '***.***.***.' + x.split('.')[-1] if x else x)
             if 'mac' in display_df.columns:
                 display_df['mac'] = display_df['mac'].apply(lambda x: str(x)[:8] + '**:**:**' if x and x != 'Unknown' else x)
 
-        st.dataframe(display_df, use_container_width=True)
+        st.dataframe(
+            display_df,
+            column_config={
+                "ip": "IP Address",
+                "hostname": "Hostname",
+                "mac": "MAC Address",
+                "vendor": "Vendor",
+                "port_80": st.column_config.CheckboxColumn("Port 80"),
+                "ping": st.column_config.CheckboxColumn("Ping Reply"),
+            },
+            use_container_width=True
+        )
         
         # Optional: Filter/Search
         st.markdown("### Search/Filter")
         search_term = st.text_input("Search IP")
         if search_term:
-            filtered_df = display_df[display_df['ip'].str.contains(search_term, na=False)]
-            st.dataframe(filtered_df, use_container_width=True)
-
+             filtered = display_df[display_df['ip'].astype(str).str.contains(search_term)]
+             st.dataframe(filtered)
     else:
-        st.info("No active hosts found.")
-        # Show empty dataframe structure
-        st.dataframe(pd.DataFrame(columns=["ip", "hostname", "mac", "vendor", "port_80", "ping"]), use_container_width=True)
+        st.info("No active hosts found yet. Try running a scan!")
 
-# Main Router
-if 'current_view' not in st.session_state:
-    st.session_state['current_view'] = 'home'
+    # Display Logs from Session State if we are NOT in the middle of a run
+    if 'scan_logs' in st.session_state and st.session_state['scan_logs']:
+        with log_expander:
+            st.code('\n'.join(st.session_state['scan_logs']))
 
-if st.session_state['current_view'] == 'home':
-    render_home()
-elif st.session_state['current_view'] == 'scanner':
-    render_network_scanner()
-elif st.session_state['current_view'] == 'ssl_inspector':
-    render_ssl_inspector()
-elif st.session_state['current_view'] == 'config_diff':
-    render_config_comparator()
-elif st.session_state['current_view'] == 'dns_propagator':
-    render_dns_propagator()
-elif st.session_state['current_view'] == 'subnet_calc':
-    render_subnet_calculator()
-elif st.session_state['current_view'] == 'latency_analyzer':
-    render_latency_analyzer()
+def render_floating_ai_assistant():
+    """
+    Renders the AI Assistant as a floating chat icon in the bottom right.
+    """
+    # CSS to float the popover button
+    st.markdown("""
+    <style>
+    /* Float the specific popover container */
+    [data-testid="stPopover"] {
+        position: fixed !important;
+        bottom: 30px !important;
+        right: 30px !important;
+        z-index: 10000 !important;
+    }
+    /* Style the button circle */
+    [data-testid="stPopover"] > div > button {
+        width: 70px !important;
+        height: 70px !important;
+        border-radius: 50% !important;
+        background-color: #FF4B4B !important;
+        color: white !important;
+        border: none !important;
+        box-shadow: 0px 4px 15px rgba(0,0,0,0.3) !important;
+        font-size: 30px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    /* Hide the default caret */
+    [data-testid="stPopover"] > div > button span {
+        display: none !important;
+    }
+    /* Tooltip/Hover effect */
+    [data-testid="stPopover"] > div > button:hover {
+        transform: scale(1.1);
+        transition: transform 0.2s;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Popover Chat Interface
+    with st.popover("🤖", help="AI Network Assistant"):
+        st.subheader("Network Assistant")
+        st.caption("Powered by NVIDIA Nemotron")
+        
+        # Chat History Container
+        messages_container = st.container(height=400)
+        
+        # Initialize History
+        if "messages" not in st.session_state:
+            st.session_state["messages"] = [{"role": "assistant", "content": "Hello! I'm your Network Engineer AI. How can I help you today?"}]
+
+        # Display History
+        with messages_container:
+            for msg in st.session_state.messages:
+                st.chat_message(msg["role"]).write(msg["content"])
+
+        # Chat Input (Inside Popover)
+        if prompt := st.chat_input("Ask about subnets, DNS, configs...", key="chat_input_popover"):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            messages_container.chat_message("user").write(prompt)
+            
+            with messages_container.chat_message("assistant"):
+                with st.spinner("Analyzing..."):
+                    response = get_ai_response(prompt)
+                    st.write(response)
+            
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
+def main():
+    # Page Config must be the first Streamlit command
+    st.set_page_config(
+        page_title="Network Automation Portal",
+        page_icon="📡",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    # Initialize session state for navigation
+    if 'current_view' not in st.session_state:
+        st.session_state['current_view'] = 'home'
+        
+    # Render the appropriate view
+    if st.session_state['current_view'] == 'home':
+        render_home()
+    elif st.session_state['current_view'] == 'scanner':
+        render_network_scanner()
+    elif st.session_state['current_view'] == 'ssl_inspector':
+        render_ssl_inspector()
+    elif st.session_state['current_view'] == 'config_diff':
+        render_config_comparator()
+    elif st.session_state['current_view'] == 'dns_propagator':
+        render_dns_propagator()
+    elif st.session_state['current_view'] == 'subnet_calc':
+        render_subnet_calculator()
+    elif st.session_state['current_view'] == 'latency_analyzer':
+        render_latency_analyzer()
+        
+    # Global Features
+    render_floating_ai_assistant()
+
+if __name__ == "__main__":
+    main()

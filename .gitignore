@@ -12,3 +12,6 @@ scan_results.json
 scan_history.json
 ssl_results.json
 config_history.json
+
+# Streamlit Secrets
+.streamlit/secrets.toml
