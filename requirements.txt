@@ -3,3 +3,5 @@ pandas
 dnspython
 watchdog
 requests
+jinja2
+graphviz

@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  network-automation:
+    build: .
+    image: network-automation-dashboard:latest
+    container_name: network-dashboard
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    volumes:
+      - ./scan_history.json:/app/scan_history.json
+      - ./scan_results.json:/app/scan_results.json
+      - ./config_history.json:/app/config_history.json
+      - ./ssl_results.json:/app/ssl_results.json
+      - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml
+    environment:
+      - PYTHONUNBUFFERED=1

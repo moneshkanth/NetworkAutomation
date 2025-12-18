@@ -16,10 +16,33 @@ A Python-based network scanner with a modern Streamlit interface. Identifies act
     -   "Demo Mode" to mask sensitive IPs/MACs for sharing/screenshots.
     -   Rate limiting to respect API usage policies.
 
-## Prerequisites
+## 🐳 Deployment (Docker)
 
--   Python 3.8+
--   Tested on macOS/Linux (Windows usage may require adjustments to `arp` commands).
+You can run this dashboard in a container environment using Docker.
+
+### Option 1: Docker Compose (Recommended)
+1. Ensure your `.streamlit/secrets.toml` is configured.
+2. Run the container:
+   ```bash
+   docker-compose up -d
+   ```
+3. Access the dashboard at `http://localhost:8501`.
+
+### Option 2: Build Manually
+1. Build the image:
+   ```bash
+   docker build -t network-dashboard .
+   ```
+2. Run the container:
+   ```bash
+   docker run -p 8501:8501 -v $(pwd)/.streamlit:/app/.streamlit network-dashboard
+   ```
+
+## 🛠️ Requirements
+- Python 3.9+ (Locally)
+- Docker (for Containerization)
+- `nmap` (Optional, for advanced scanning features in future)
+- `graphviz` (Required for Topology/BGP Maps) macOS/Linux (Windows usage may require adjustments to `arp` commands).
 
 ## Installation
 

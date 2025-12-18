@@ -111,6 +111,11 @@ from dns_propagator import check_dns_propagation
 from subnet_calculator import calculate_subnet_details
 from latency_analyzer import analyze_latency
 from ai_assistant import get_ai_response
+from config_generator import generate_configs
+from network_linter import lint_config
+from route_optimizer import optimize_routes
+from topology_mapper import generate_topology_dot
+from bgp_inspector import get_asn_details, get_asn_peers, get_asn_prefixes, generate_bgp_graph
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
@@ -439,6 +444,262 @@ def render_latency_analyzer():
                     })
                     st.bar_chart(chart_data.set_index("Phase"), color="#FF4B4B")
 
+def render_config_generator():
+    """
+    Renders the Config Generator view with inputs and tabbed outputs.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Generates consistent configs for Cisco NX-OS, Juniper Junos, and SONiC.")
+
+    st.title("🏭 Config Generator")
+    st.markdown("Automate interface and VLAN configurations.")
+
+    with st.container(border=True):
+        st.subheader("Input Parameters")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            interface_name = st.text_input("Interface Name", "Ethernet1/1", help="e.g. Ethernet1/1, ge-0/0/0")
+            vlan_id = st.number_input("VLAN ID", min_value=1, max_value=4094, value=10)
+            
+        with col2:
+            ip_address = st.text_input("IP Address/Mask", "192.168.10.1/24")
+            mtu = st.number_input("MTU", min_value=576, max_value=9216, value=9000)
+
+    if st.button("Generate Configs", type="primary"):
+        data = {
+            "interface_name": interface_name,
+            "vlan_id": vlan_id,
+            "ip_address": ip_address,
+            "mtu": mtu
+        }
+        
+        results = generate_configs(data)
+        
+        st.divider()
+        st.subheader("Generated Configuration")
+        
+        tab1, tab2, tab3 = st.tabs(["Cisco NX-OS", "Juniper Junos", "Microsoft SONiC"])
+        
+        with tab1:
+            st.code(results.get("Cisco NX-OS", ""), language="bash")
+            st.write("Classic Datacenter CLI")
+            
+        with tab2:
+            st.code(results.get("Juniper Junos", ""), language="bash")
+            st.write("Structured Set Commands")
+            
+        with tab3:
+            st.code(results.get("Microsoft SONiC", ""), language="json")
+            st.write("JSON Format for ConfigDB")
+
+            st.code(results.get("Microsoft SONiC", ""), language="json")
+            st.write("JSON Format for ConfigDB")
+
+def render_network_linter():
+    """
+    Renders the Network Linter view with textarea input and policy report.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Policy as Code: Automated validation against Golden Rules.")
+
+    st.title("🛡️ Network Linter")
+    st.markdown("Scan your configuration for Security, Performance, and Availability risks.")
+
+    config_text = st.text_area("Paste Configuration", height=300, help="Paste standard CLI config (Cisco, Arista, etc)")
+
+    if st.button("Run Policy Scan"):
+        if not config_text.strip():
+            st.warning("Please paste a configuration first.")
+        else:
+            with st.spinner("Running Unit Tests..."):
+                results = lint_config(config_text)
+                
+            st.divider()
+            st.subheader("Compliance Report")
+            
+            # Count errors
+            errors = len([r for r in results if r['severity'] == 'Error'])
+            warnings = len([r for r in results if r['severity'] == 'Warning'])
+            passed = len([r for r in results if r['severity'] == 'Pass'])
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Errors (Critical)", errors, delta_color="inverse")
+            c2.metric("Warnings", warnings, delta_color="inverse")
+            c3.metric("Checks Passed", passed)
+            
+            st.markdown("### Detailed Findings")
+            
+            for item in results:
+                if item['severity'] == "Error":
+                    st.error(f"**{item['rule']}**: {item['message']}")
+                elif item['severity'] == "Warning":
+                    st.warning(f"**{item['rule']}**: {item['message']}")
+                else:
+                    st.success(f"**{item['rule']}**: {item['message']}")
+                    
+
+def render_route_optimizer():
+    """
+    Renders the Route Optimizer view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Algorithms: Uses IP Set Reduction to minimize CIDR blocks.")
+
+    st.title("🧠 Route & ACL Optimizer")
+    st.markdown("Summarize a list of IP addresses into the smallest possible set of CIDRs.")
+
+    raw_text = st.text_area("Paste IP List (One per line)", height=300, help="e.g. 192.168.1.1, 10.0.0.0/24")
+
+    if st.button("Optimize Routes", type="primary"):
+        if not raw_text.strip():
+            st.warning("Please paste some IP addresses.")
+        else:
+            with st.spinner("Optimizing using supernetting algorithms..."):
+                results = optimize_routes(raw_text)
+                
+            st.divider()
+            
+            # Metrics
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Original Count", results['original_count'])
+            c2.metric("Optimized Count", results['optimized_count'])
+            c3.metric("Optimization Ratio", f"{results['reduction_percentage']}%", delta_color="normal")
+            
+            if results['errors']:
+                with st.expander("Parsing Errors (Ignored Lines)"):
+                    st.write(results['errors'])
+            
+            st.subheader("Optimized CIDR List")
+            st.code('\n'.join(results['optimized_cidrs']), language="text")
+            st.caption("Copy this list for your Firewalls/ACLs.")
+
+            st.subheader("Optimized CIDR List")
+            st.code('\n'.join(results['optimized_cidrs']), language="text")
+            st.caption("Copy this list for your Firewalls/ACLs.")
+
+def render_topology_mapper():
+    """
+    Renders the LLDP Topology Mapper view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Visualizes 'show lldp neighbors' output as a network graph.")
+        st.caption("Powered by Graphviz")
+
+    st.title("🗺️ LLDP Topology Mapper")
+    st.markdown("Visualize string connections from raw CLI output.")
+
+    # Callback to load sample
+    def load_cisco_sample():
+        st.session_state.lldp_input = """
+Device ID        Local Intf     Holdtme    Capability  Platform  Port ID
+Switch-Core-01   Eth1/1         120        R B         N9K       Eth1/48
+Router-Edge-02   Eth1/2         120        R           ASR       Gi0/0/1
+Access-Switch-03 Eth1/3         120        S           Cat9k     Te1/0/48
+Server-Rack-04   Eth1/4         120        H           Linux     eth0
+        """.strip()
+
+    # Two column layout: Input & Controls
+    col1, col2 = st.columns([2, 1])
+
+    with col2:
+        st.subheader("Sample Data")
+        st.button("Load Cisco Sample", on_click=load_cisco_sample)
+
+    with col1:
+        # Use value from session state if available
+        lldp_input = st.text_area("Paste 'show lldp neighbors' output", height=300, key="lldp_input")
+            
+    if st.button("Visualize Topology", type="primary"):
+        if not lldp_input.strip():
+            st.warning("Please paste LLDP output.")
+        else:
+            try:
+                dot_source = generate_topology_dot(lldp_input)
+                st.divider()
+                st.subheader("Network Graph")
+                st.graphviz_chart(dot_source)
+            except Exception as e:
+                st.error(f"Visualization Error: {e}")
+
+
+
+def render_bgp_inspector():
+    """
+    Renders the BGP Inspector view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Queries api.bgpview.io for ASN Details, Peers, and Prefixes.")
+        st.caption("External Connectivity")
+
+    st.title("🌎 BGP Looking Glass")
+    st.markdown("Inspect Autonomous System (ASN) relationships and upstream providers.")
+
+    asn_input = st.text_input("Enter ASN (Autonomous System Number)", "8075", help="e.g. 8075 (Microsoft), 15169 (Google)")
+
+    if st.button("Inspect ASN", type="primary"):
+        if not asn_input.isdigit():
+            st.error("Please enter a valid numeric ASN.")
+        else:
+            with st.spinner(f"Fetching BGP data for AS{asn_input}..."):
+                # 1. Get Details
+                details = get_asn_details(asn_input)
+                
+                if "error" in details:
+                    st.error(f"API Error: {details['error']}")
+                else:
+                    # Metrics
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Owner", details.get('owner', 'N/A'))
+                    c2.metric("Country", details.get('country', 'N/A'))
+                    c3.metric("RIR", details.get('rer', 'N/A'))
+                    
+                    # 2. Get Peers for Graph
+                    peers = get_asn_peers(asn_input)
+                    c4.metric("Total Peers", len(peers))
+                    
+                    st.divider()
+                    
+                    # Tabs for View
+                    tab1, tab2 = st.tabs(["🕸️ Upstream Graph", "📋 Advertised Prefixes"])
+                    
+                    with tab1:
+                        st.subheader("Upstream Connectivity Map")
+                        if peers:
+                             dot_source = generate_bgp_graph(asn_input, peers)
+                             st.graphviz_chart(dot_source)
+                        else:
+                            st.warning("No peer data found.")
+                            
+                    with tab2:
+                        st.subheader("Advertised IPv4 Prefixes")
+                        prefixes = get_asn_prefixes(asn_input)
+                        if prefixes:
+                            df = pd.DataFrame(prefixes)
+                            st.dataframe(df, use_container_width=True)
+                        else:
+                            st.info("No prefixes found.")
+
 def render_home():
     """
     Renders the Home page with service tiles for navigation.
@@ -512,6 +773,62 @@ def render_home():
             st.write("Analyze DNS, TCP connect, TTFB, and download timings.")
             if st.button("Launch Analyzer", key="btn_launch_latency", use_container_width=True):
                 st.session_state['current_view'] = 'latency_analyzer'
+                st.rerun()
+
+    # 7. Config Generator (Second column of second row)
+    with cols_row2[1]:
+        with st.container(border=True):
+            st.write("🏭")
+            st.subheader("Config Gen")
+            st.write("Generate configs for Cisco, Juniper, and SONiC.")
+            if st.button("Launch Generator", key="btn_launch_gen", use_container_width=True):
+                st.session_state['current_view'] = 'config_gen'
+                st.rerun()
+
+    # 8. Network Linter (Third column of second row)
+    with cols_row2[2]:
+        with st.container(border=True):
+            st.write("🛡️")
+            st.subheader("Net Linter")
+            st.write("Scan configs for Telnet, MTU, and disabled links.")
+            if st.button("Launch Linter", key="btn_launch_linter", use_container_width=True):
+                st.session_state['current_view'] = 'network_linter'
+                st.rerun()
+
+    # 9. Route Optimizer (Fourth column of second row)
+    with cols_row2[3]:
+         with st.container(border=True):
+            st.write("🧠")
+            st.subheader("Optimizer")
+            st.write("Algorithmically summarize IPs into minimal CIDRs.")
+            if st.button("Launch Optimizer", key="btn_launch_opt", use_container_width=True):
+                st.session_state['current_view'] = 'route_optimizer'
+                st.rerun()
+
+    # 10. Topology Mapper (Fifth column of second row)
+    with cols_row2[4]:
+         with st.container(border=True):
+            st.write("🗺️")
+            st.subheader("Topology")
+            st.write("Visualize LLDP neighbors as a graph.")
+            if st.button("Launch Mapper", key="btn_launch_topo", use_container_width=True):
+                st.session_state['current_view'] = 'topology_mapper'
+                st.rerun()
+
+    # 11. BGP Inspector (First column of third row - or actually let's re-flow)
+    # To keep it balanced, let's just add a new row or squeeze it in.
+    # Let's add a 3rd Row for "External" tools.
+    
+    st.write("")
+    cols_row3 = st.columns(5)
+    
+    with cols_row3[0]:
+         with st.container(border=True):
+            st.write("🌎")
+            st.subheader("BGP Look")
+            st.write("Inspect ASN peers and prefixes.")
+            if st.button("Launch BGP", key="btn_launch_bgp", use_container_width=True):
+                st.session_state['current_view'] = 'bgp_inspector'
                 st.rerun()
 
 def render_network_scanner():
@@ -802,6 +1119,16 @@ def main():
         render_subnet_calculator()
     elif st.session_state['current_view'] == 'latency_analyzer':
         render_latency_analyzer()
+    elif st.session_state['current_view'] == 'config_gen':
+        render_config_generator()
+    elif st.session_state['current_view'] == 'network_linter':
+        render_network_linter()
+    elif st.session_state['current_view'] == 'route_optimizer':
+        render_route_optimizer()
+    elif st.session_state['current_view'] == 'topology_mapper':
+        render_topology_mapper()
+    elif st.session_state['current_view'] == 'bgp_inspector':
+        render_bgp_inspector()
         
     # Global Features
     render_floating_ai_assistant()
