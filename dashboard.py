@@ -116,6 +116,9 @@ from network_linter import lint_config
 from route_optimizer import optimize_routes
 from topology_mapper import generate_topology_dot
 from bgp_inspector import get_asn_details, get_asn_peers, get_asn_prefixes, generate_bgp_graph
+from mac_inspector import get_mac_vendor
+from log_extractor import extract_patterns
+from tcp_calculator import calculate_tcp_performance
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
@@ -700,6 +703,154 @@ def render_bgp_inspector():
                         else:
                             st.info("No prefixes found.")
 
+
+
+def render_mac_inspector():
+    """
+    Renders the MAC Vendor Inspector view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Queries api.macvendors.com for manufacturer details.")
+    
+    st.title("🏷️ MAC Vendor Inspector")
+    st.markdown("Identify the manufacturer of a network device from its MAC address.")
+
+    # Centered Layout
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        mac_input = st.text_input("Enter MAC Address", placeholder="e.g. 00:1A:2B:3C:4D:5E")
+        
+        if st.button("Find Vendor", type="primary", use_container_width=True):
+            if not mac_input:
+                st.warning("Please enter a MAC address.")
+            else:
+                with st.spinner("Querying OUI Database..."):
+                    result = get_mac_vendor(mac_input)
+                    
+                    st.divider()
+                    
+                    if "error" in result:
+                        st.error(result['error'])
+                    else:
+                        st.success(f"**Vendor Found:**")
+                        st.markdown(f"### {result['vendor']}")
+                        st.balloons()
+
+
+def render_log_extractor():
+    """
+    Renders the Log Pattern Extractor view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Extracts IOCs (IPs, Emails) and Errors from unstructured text.")
+
+    st.title("📂 Log Pattern Extractor")
+    st.markdown("Parse chaos into structured data.")
+
+    # Controls
+    mode = st.selectbox("Extraction Mode", ["IPv4", "Email", "Errors"])
+    
+    log_text = st.text_area("Paste Log Data", height=300, help="Paste syslog, server logs, or any text blob.")
+    
+    if st.button("Extract Patterns", type="primary"):
+        if not log_text.strip():
+            st.warning("Please paste some text.")
+        else:
+            with st.spinner("Parsing patterns..."):
+                result = extract_patterns(log_text, mode)
+                
+                st.divider()
+                
+                if "error" in result:
+                    st.error(result['error'])
+                else:
+                    count = result['count']
+                    data = result['results']
+                    
+                    st.metric(f"Found ({mode})", count)
+                    
+                    if count > 0:
+                        st.subheader("Results")
+                        # For Errors (lines), just show text list
+                        if mode == "Errors":
+                             for line in data:
+                                 st.code(line, language="text")
+                        else:
+                             # For IPs/Emails, dataframe is nice
+                             df = pd.DataFrame(data, columns=["Match"])
+                             st.dataframe(df, use_container_width=True)
+                    else:
+                        st.info("No matches found.")
+
+
+
+def render_tcp_calculator():
+    """
+    Renders the TCP Performance Calculator view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Calculates Bandwidth Delay Product (BDP) and TCP Window limits.")
+
+    st.title("🧮 TCP Performance Calculator")
+    st.markdown("Optimize throughput for high-BDP links.")
+
+    with st.container(border=True):
+        st.subheader("Link Parameters")
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            bandwidth = st.number_input("Bandwidth", min_value=1.0, value=1.0, step=0.5)
+        with col2:
+            unit = st.selectbox("Unit", ["Gbps", "Mbps"])
+        with col3:
+            rtt = st.slider("Round Trip Time (ms)", min_value=0, max_value=500, value=50, step=1)
+
+    if st.button("Calculate Performance", type="primary"):
+        results = calculate_tcp_performance(bandwidth, unit, rtt)
+        
+        if "error" in results:
+            st.error(results['error'])
+        else:
+            st.divider()
+            
+            # Key Metric: BDP (Required Window)
+            st.success(f"### Required Window Size: **{results['optimal_window_size']}**")
+            st.caption("To fill this pipe, your TCP buffers must be at least this size.")
+            
+            # Throughput Details
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Link Capacity", f"{results['link_capacity_mbps']} Mbps")
+            c2.metric("Max Speed (64KB Wind)", f"{results['standard_window_throughput_mbps']} Mbps")
+            c3.metric("Efficiency Drop", f"{100 - results['efficiency']:.1f}%", delta_color="inverse")
+            
+            # Warning if efficient is low
+            if results['efficiency'] < 50:
+                st.warning(f"⚠️ High Latency Impact: With a standard 64KB window, you are only utilizing {results['efficiency']}% of your link.")
+                st.info("💡 **Recommendation**: Enable TCP Window Scaling (RFC 1323) on your OS.")
+            else:
+                st.success("✅ Good Performance: Standard TCP settings are sufficient for this latency.")
+            
+            # Visualization
+            st.subheader("Throughput Comparison")
+            chart_data = pd.DataFrame({
+                "Default Window (64KB)": [results['standard_window_throughput_mbps']],
+                "Optimized Window": [results['link_capacity_mbps']]
+            })
+            st.bar_chart(chart_data, color=["#FFCDD2", "#A5D6A7"])
+
 def render_home():
     """
     Renders the Home page with service tiles for navigation.
@@ -829,6 +980,36 @@ def render_home():
             st.write("Inspect ASN peers and prefixes.")
             if st.button("Launch BGP", key="btn_launch_bgp", use_container_width=True):
                 st.session_state['current_view'] = 'bgp_inspector'
+                st.rerun()
+
+    # 12. MAC Inspector (Second column of third row)
+    with cols_row3[1]:
+         with st.container(border=True):
+            st.write("🏷️")
+            st.subheader("MAC Check")
+            st.write("Lookup Vendor by MAC Address.")
+            if st.button("Launch MAC", key="btn_launch_mac", use_container_width=True):
+                st.session_state['current_view'] = 'mac_inspector'
+                st.rerun()
+
+    # 13. Log Extractor (Third column of third row)
+    with cols_row3[2]:
+         with st.container(border=True):
+            st.write("📂")
+            st.subheader("Log Parser")
+            st.write("Extract IPs, Emails, and Errors.")
+            if st.button("Launch LOG", key="btn_launch_log", use_container_width=True):
+                st.session_state['current_view'] = 'log_extractor'
+                st.rerun()
+
+    # 14. TCP Calculator (Fourth column of third row)
+    with cols_row3[3]:
+         with st.container(border=True):
+            st.write("🧮")
+            st.subheader("TCP Calc")
+            st.write("BDP & Window Tuning.")
+            if st.button("Launch TCP", key="btn_launch_tcp", use_container_width=True):
+                st.session_state['current_view'] = 'tcp_calculator'
                 st.rerun()
 
 def render_network_scanner():
@@ -1129,6 +1310,12 @@ def main():
         render_topology_mapper()
     elif st.session_state['current_view'] == 'bgp_inspector':
         render_bgp_inspector()
+    elif st.session_state['current_view'] == 'mac_inspector':
+        render_mac_inspector()
+    elif st.session_state['current_view'] == 'log_extractor':
+        render_log_extractor()
+    elif st.session_state['current_view'] == 'tcp_calculator':
+        render_tcp_calculator()
         
     # Global Features
     render_floating_ai_assistant()
