@@ -1,0 +1,285 @@
+# Network Automation & Observability Dashboard - Comprehensive Documentation
+**Generated for**: User
+**Date**: December 20, 2025
+
+This document provides a deep dive into every tool built for the "Network Automation Portal". It includes the internal logic, professional use cases, and the "Master Prompts" required to replicate them using an LLM.
+
+---
+
+## 🏗️ Core Architecture (The Dashboard)
+**Tool Name**: Central Dashboard (Streamlit)
+**Built Logic**: 
+- Built as a **Single Page Application (SPA)** using `streamlit`.
+- Uses `st.session_state` to switch between 18+ different views without reloading the page.
+- Implements a responsive grid layout for the "Home" page tile system.
+- Includes a global sidebar for navigation and a persistent "AI Assistant" chat widget.
+**Use Case**: 
+- A "Single Pane of Glass" for Network Engineers (NetOps) and Site Reliability Engineers (SREs). eliminates the need to switch between 10 different CLI tools and websites.
+**Where it can be used**: 
+- NOC (Network Operations Center) screens, Engineering Laptops, Jump Hosts.
+**Detailed Prompt**:
+> "Create a python dashboard using the `streamlit` library. It should function as a Single Page Application.
+> 1.  Use `st.session_state['current_view']` to control which function is rendered (e.g., Home, Scanner, Calculator).
+> 2.  The 'Home' view should display a grid of clickable cards (Metric Tiles). Clicking a card updates the session state to launch that tool.
+> 3.  Include a sidebar with a 'Back to Home' button that appears only when inside a tool.
+> 4.  Style it with a wide layout and professional header."
+
+---
+
+## 📡 1. Network Scanner
+**Built Logic**: 
+- Uses `scapy` (or `nmap` where available) to send ICMP Echo Requests (Pings) and TCP SYN packets to a user-defined CIDR block (e.g., `192.168.1.0/24`).
+- Multi-threaded: Uses `concurrent.futures` to scan hundreds of IPs in seconds.
+- Data Processing: Returns active IPs, Hostnames (Reverse DNS), and Open Ports (80/443).
+**Use Case**: 
+- **Inventory Audit**: Finding what IPs are actually in use vs what IPAM says.
+- **Security Audit**: Finding rogue devices on a guest VLAN.
+**Detailed Prompt**:
+> "Create a `network_scanner.py` module. It should accept a CIDR string input.
+> 1.  Use `concurrent.futures.ThreadPoolExecutor` to ping every IP in the configured subnet in parallel.
+> 2.  If an IP responds, verify if Port 80/443 is open using `socket`.
+> 3.  Attempt a reverse DNS lookup.
+> 4.  Return the results as a Pandas DataFrame and display it in Streamlit."
+
+## 🔐 2. SSL Inspector
+**Built Logic**: 
+- Uses Python's `ssl` and `socket` libraries to establish a handshake with a target domain on port 443.
+- Extracts the **X.509 Certificate**.
+- Calculates "Days Until Expiry" by comparing `notAfter` date with `datetime.now()`.
+**Use Case**: 
+- **Outage Prevention**: Catching expired certificates *before* they take down production.
+- **Verification**: Ensuring the correct CA signed the cert.
+**Detailed Prompt**:
+> "Create an `ssl_checker.py` tool.
+> 1.  Accept a list of domains (textarea input).
+> 2.  For each domain, open a socket to port 443 and wrap it with `ssl.create_default_context()`.
+> 3.  Extract the certificate's `notAfter` date and Issuer.
+> 4.  Calculate 'Days Remaining'. If < 30 days, highlight in RED. Display as a table."
+
+## ⚖️ 3. Config Diff
+**Built Logic**: 
+- Text Processing: Uses Python's `difflib.HtmlDiff` library.
+- Compares two text blocks ("Before" vs "After") line-by-line.
+- Generates a color-coded HTML snippet (Green for additions, Red for deletions) and renders it using `st.components.v1.html`.
+**Use Case**: 
+- **Change Management**: Verifying exactly what changed during a maintenance window.
+- **Auditing**: Comparing the running config against the golden backup.
+**Detailed Prompt**:
+> "Create a `config_diff.py` tool.
+> 1.  Build a UI with two large text areas: 'Original Config' and 'New Config'.
+> 2.  Use Python's `difflib` to compare them.
+> 3.  Generate a side-by-side HTML view where differences are highlighted (Red/Green background).
+> 4.  Embed this HTML into the Streamlit app."
+
+## 🌎 4. Global DNS Checker
+**Built Logic**: 
+- Uses `dns.resolver` (dnspython).
+- Queries specific authoritative Nameservers representing different providers/regions:
+    - Google (8.8.8.8)
+    - Cloudflare (1.1.1.1)
+    - Quad9 (9.9.9.9)
+    - Level3 (4.2.2.2)
+- Compares the returned A-Records to see if they match.
+**Use Case**: 
+- **Troubleshooting**: "Is the site down, or is DNS just not propagated yet?"
+- **CDN Debugging**: Ensuring users in different regions are routed to the correct IP.
+**Detailed Prompt**:
+> "Create a `dns_propagator.py` tool.
+> 1.  Input: Domain Name (e.g., google.com).
+> 2.  Logic: Query these specific DNS servers: 8.8.8.8, 1.1.1.1, 9.9.9.9, 208.67.222.222.
+> 3.  Output: A table showing the resolved IP from each provider.
+> 4.  Highlight in Green if all match, Red if there are inconsistencies."
+
+## 🔢 5. Subnet Calculator
+**Built Logic**: 
+- Uses Python's `ipaddress` library.
+- Input: IP + CIDR (e.g., `10.0.0.1/24`).
+- output: Network Address, Broadcast Address, Netmask, Usable IP Range, and Total Hosts.
+**Use Case**: 
+- **Provisioning**: Planning IP addressing for a new site or VLAN.
+- **Validation**: Checking if an IP is the Gateway or Broadcast address.
+**Detailed Prompt**:
+> "Create a `subnet_calculator.py` tool using the `ipaddress` library.
+> 1.  Input: CIDR Block (e.g., 10.1.1.0/24).
+> 2.  Calculate: Network ID, Broadcast IP, Netmask, First Host, Last Host, Total Usable IPs.
+> 3.  Display these details in a visual 'Metric Card' layout."
+
+## ⏱️ 6. Latency Analyzer
+**Built Logic**: 
+- Multi-step probing using `requests` and `socket`.
+- **DNS Time**: Measures time to resolve hostname.
+- **TCP Handshake**: Measures time to `syn` -> `syn-ack`.
+- **TTFB**: Time to First Byte (HTTP Response).
+- **Download**: Time to download the content.
+**Use Case**: 
+- **App Performance**: "Why is the website slow?" Distinguishes between "Network Lag" (TCP) and "Server Lag" (TTFB).
+**Detailed Prompt**:
+> "Create a `latency_analyzer.py` tool.
+> 1.  Input: URL (http/https).
+> 2.  Measure 4 metrics: DNS Resolution Time, TCP Connection Time (Socket Connect), Time to First Byte (TTFB), Total Download Time.
+> 3.  Display these as 4 metric cards with ms values.
+> 4.  Add a progress bar during the test."
+
+## 🏭 7. Config Generator
+**Built Logic**: 
+- Uses **Jinja2** templating engine.
+- Loads predefined template strings (e.g., for Cisco Interface or BGP Peer).
+- Merges user input (Form data) into the template placeholders (`{{ vlan_id }}`, `{{ ip_addr }}`).
+**Use Case**: 
+- **Standardization**: Ensuring every switch port is configured with the exact same security policies (BPDUGuard, StormControl).
+**Detailed Prompt**:
+> "Create a `config_generator.py` module using `jinja2`.
+> 1.  Define a template for a 'Cisco NX-OS Access Port' (include description, vlan, spanning-tree settings).
+> 2.  Create a Streamlit form to accept: Interface Name, VLAN ID, Description.
+> 3.  On Submit, render the Jinja2 template with these variables and display the code block."
+
+## 🧹 8. Network Linter
+**Built Logic**: 
+- **Regex-based Static Analysis**.
+- Defines a set of "Rules":
+    - *Critical*: `password 7` (Weak encryption).
+    - *Warning*: `telnet` (Insecure protocol).
+    - *Info*: Missing descriptions.
+- Scans the text input and returns a list of violations.
+**Use Case**: 
+- **Security Gateway**: Checking configs before they are pushed to production.
+- **Standard Enforcement**: Ensuring description fields are not empty.
+**Detailed Prompt**:
+> "Create a `network_linter.py` tool.
+> 1.  Input: Text Area for Config.
+> 2.  Define a list of Rules using Regex (e.g., find 'transport input telnet', 'snmp-server community public').
+> 3.  Scan the input text.
+> 4.  Output a list of 'Errors' (Red) and 'Warnings' (Yellow) found in the config."
+
+## 📉 9. Route Optimizer
+**Built Logic**: 
+- Uses `ipaddress.collapse_addresses()`.
+- Takes a list of IP subnets, converts them to `IPv4Network` objects.
+- Algorithmically merges adjacent/overlapping subnets into the smallest possible set of CIDRs.
+**Use Case**: 
+- **ACL Optimization**: Reducing a Firewall ACL from 100 lines to 10 lines.
+- **Routing Table Health**: Summarizing routes to save memory on routers.
+**Detailed Prompt**:
+> "Create a `route_optimizer.py` tool.
+> 1.  Input: Text area accepting a list of IP Subnets (one per line).
+> 2.  Parse lines into `ipaddress.IPv4Network` objects.
+> 3.  Use `ipaddress.collapse_addresses(list)` to summarize them.
+> 4.  Display the 'Before' count vs 'After' count and the optimized list."
+
+## 🗺️ 10. Topology Mapper
+**Built Logic**: 
+- Text Parsing + Graph Visualization.
+- Uses `graphviz` library.
+- Parses `show cdp neighbors detail` or `show lldp neighbors` text output using Regex to extract (Local Device, Port) -> (Remote Device, Port).
+- Generates a DOT file and renders it interactively.
+**Use Case**: 
+- **Documentation**: Instantly creating a network map from CLI output without drawing manually in Visio.
+**Detailed Prompt**:
+> "Create a `topology_mapper.py` tool using `graphviz`.
+> 1.  Input: Text area for 'show cdp neighbors' output.
+> 2.  Use Regex to extract the 'Device ID' and 'Local Interface'.
+> 3.  Construct a directed graph: `dot.edge(source, target)`.
+> 4.  Render the diagram in Streamlit."
+
+## 🌐 11. BGP Inspector
+**Built Logic**: 
+- API Consumer: Queries **RIPE Stat API** (`stat.ripe.net`).
+- Endpoints used: `looking-glass`, `network-info`.
+- Fetches Global Visibility (How many peers see this prefix?).
+**Use Case**: 
+- **Troubleshooting**: "Is my prefix advertised globally?"
+- **Security**: Detecting BGP Hijacks (Unauthorized ASN origin).
+**Detailed Prompt**:
+> "Create a `bgp_inspector.py` tool.
+> 1.  Use the public RIPE Stat API.
+> 2.  Input: ASN (e.g., 65000) or Prefix (e.g., 1.1.1.0/24).
+> 3.  Fetch the 'Routing Status' and 'Visualized Peers'.
+> 4.  Display the 'Hosting Provider' name and a graph of Upstream Peers."
+
+## 🏷️ 12. MAC Vendor Check
+**Built Logic**: 
+- API Consumer: Queries `macvendors.com`.
+- **Normalization**: Uses logic to sanitize inputs. converts `aa.bb.cc`, `aa-bb-cc`, `aabbcc` all to `aa:bb:cc` before querying.
+**Use Case**: 
+- **Forensics**: "Who is 10.1.1.5?" -> Lookup MAC -> "It's an Apple Device".
+**Detailed Prompt**:
+> "Create a `mac_inspector.py` tool.
+> 1.  Input: MAC Address string (allow messy formats like dots or dashes).
+> 2.  Logic: Normalize valid MACs to `xx:xx:xx:xx:xx:xx` format.
+> 3.  Query `https://api.macvendors.com/{mac}`.
+> 4.  Output the Vendor Name (e.g., 'Cisco Systems')."
+
+## 🪵 13. Log Parser
+**Built Logic**: 
+- **Pattern Extraction**.
+- Uses regex to extract structured data from unstructured text logs.
+- Patterns: IPv4 Addresses, Email Addresses, Error Codes (e.g., `Error`, `Fail`, `Critical`).
+**Use Case**: 
+- **Incident Response**: Extracting all IP addresses from a firewall log to block them.
+- **Cleanup**: Finding all email addresses in a dump.
+**Detailed Prompt**:
+> "Create a `log_extractor.py` tool.
+> 1.  Input: Large text block (Logs).
+> 2.  Buttons: 'Extract IPs', 'Extract Emails', 'Find Errors'.
+> 3.  Logic: Use Regex `r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'` for IPs.
+> 4.  Output the unique list of matches."
+
+## 🧮 14. TCP Performance Calculator
+**Built Logic**: 
+- **Physics/Math**: Implements Bandwidth Delay Product (BDP).
+- Formula: `BDP (bits) = Bandwidth (bps) * RTT (sec)`.
+- Formula: `Max Throughput = Window Size / RTT`.
+**Use Case**: 
+- **WAN Optimization**: Proving that packet loss isn't the issue—TCP Window Size is.
+- **Capacity Planning**: Sizing buffers for long-distance links.
+**Detailed Prompt**:
+> "Create a `tcp_calculator.py` tool.
+> 1.  Inputs: Bandwidth (Mbps), RTT (ms), Window Size (KB).
+> 2.  Calculate: Bandwidth Delay Product (BDP) and Theoretical Max Throughput.
+> 3.  Show a bar chart comparing 'Actual Throughput' vs 'Link Capacity'.
+> 4.  Warn if the TCP Window is too small for the latency (LFN)."
+
+## ☁️ 15. Azure Service Tag Explorer
+**Built Logic**: 
+- **Data Scraper**: Fetches Microsoft's Azure Service Tag JSON.
+- **Dynamic Source**: Uses a GitHub mirror (`maciejporebski/azure-ips`) because Microsoft's official URL changes weekly.
+- **Parser**: Filters ~50MB JSON data by "Service Name" and "Region". Extracts IPv4 list.
+**Use Case**: 
+- **Hybrid Cloud Security**: Allowing "Only Azure SQL East US" traffic through your on-premise Cisco Firewall.
+**Detailed Prompt**:
+> "Create an `azure_ranger.py` tool.
+> 1.  Fetch the 'ServiceTags_Public_Latest.json' from raw.githubusercontent.com. Cache it heavily.
+> 2.  UI: Search Box for Service (e.g. 'AzureDevOps'), Dropdown for Region.
+> 3.  Logic: Filter the JSON `values` list.
+> 4.  Output: A formatted 'Cisco ACL' text block (`permit ip <prefix> any`)."
+
+## 🛡️ 16. Public Shodan Scanner
+**Built Logic**: 
+- API Consumer: Queries `internetdb.shodan.io`.
+- **Threat Logic**: Checks for "Critical Ports" (3389/RDP, 23/Telnet).
+- Visualization: Groups ports into color-coded badges (Green=Web, Red=Critical).
+**Use Case**: 
+- **External Audit**: Verifying what your network looks like to a hacker.
+- **Firewall Validation**: "Did I actually close port 3389?"
+**Detailed Prompt**:
+> "Create a `recon_tools.py` function for Shodan.
+> 1.  Query `https://internetdb.shodan.io/{public_ip}`.
+> 2.  Parse the `ports` list.
+> 3.  UI: If port 3389 or 23 is present, display a large RED warning.
+> 4.  List all open ports as colorful badges. List CVE vulnerabilities in a table."
+
+## 🕵️‍♂️ 17. Shadow IT Subdomain Finder
+**Built Logic**: 
+- API Consumer: Queries **CRT.sh** (Certificate Transparency).
+- **Resilience**: Implements a Retry Loop (3x) and a **Fallback Mechanism**.
+    - Primary: `crt.sh`.
+    - Backup: `api.hackertarget.com`.
+- **Uniqueness**: Dedupes the result set (CT logs contain many duplicates).
+**Use Case**: 
+- **Reconnaissance**: Finding dev/test subdomains (`dev.corp.com`) that engineers forgot to delete.
+**Detailed Prompt**:
+> "Add a subdomain finder to `recon_tools.py`.
+> 1.  Input: Domain Name.
+> 2.  Query `https://crt.sh/?q=%.{domain}&output=json`.
+> 3.  **Crucial**: Add a try/except block. If crt.sh times out (502 error), failover to `api.hackertarget.com`.
+> 4.  Process results to return only unique subdomains."

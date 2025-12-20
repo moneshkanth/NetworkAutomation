@@ -119,6 +119,9 @@ from bgp_inspector import get_asn_details, get_asn_peers, get_asn_prefixes, gene
 from mac_inspector import get_mac_vendor
 from log_extractor import extract_patterns
 from tcp_calculator import calculate_tcp_performance
+from tcp_calculator import calculate_tcp_performance
+from azure_ranger import fetch_azure_data_v2, get_unique_regions, filter_azure_ranges, generate_cisco_acl
+from recon_tools import get_shodan_data, get_crt_subdomains
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
@@ -851,6 +854,271 @@ def render_tcp_calculator():
             })
             st.bar_chart(chart_data, color=["#FFCDD2", "#A5D6A7"])
 
+def render_azure_ranger():
+    """
+    Renders the Azure Service Tag Explorer view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Fetches live Service Tags from Microsoft. Cached for performance.")
+
+    st.title("☁️ Azure Service Tag Explorer")
+    st.markdown("Generate Firewall ACLs dynamically from Microsoft's public cloud data.")
+
+    # 1. Fetch Data
+    with st.spinner("Fetching Azure Data (this may take a moment)..."):
+        data = fetch_azure_data_v2()
+        
+    if "error" in data:
+        st.error(f"Failed to fetch data: {data['error']}")
+        return
+
+    # 2. Extract Regions for Dropdown
+    regions = get_unique_regions(data)
+    regions.insert(0, "All")
+
+    # 3. Controls
+    # Initialize session state for search
+    if 'azure_search_q' not in st.session_state:
+        st.session_state.azure_search_q = ""
+
+    st.caption("Common Services:")
+    b_cols = st.columns(6)
+    quick_picks = ["AzureDevOps", "Sql", "Storage", "AppService", "AzureCloud", "LogicApps"]
+    for i, svc in enumerate(quick_picks):
+        if b_cols[i].button(svc, use_container_width=True):
+             st.session_state.azure_search_q = svc
+             st.rerun()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        service_query = st.text_input("Search Service", placeholder="e.g. AzureDevOps, Sql, Storage", key="azure_search_q")
+    with col2:
+        region_filter = st.selectbox("Filter Region", regions, index=0)
+
+    # 4. Process
+    if service_query:
+        matches = filter_azure_ranges(data, service_query, region_filter)
+        count = len(matches)
+        
+        st.divider()
+        st.subheader("Results")
+        st.metric("Total IPv4 Ranges Found", count)
+        
+        if count > 0:
+            # Generate ACL
+            acl_text = generate_cisco_acl(matches)
+            
+            tab1, tab2 = st.tabs(["📜 Cisco ACL", "📋 Raw List"])
+            
+            with tab1:
+                st.code(acl_text, language="text")
+                st.caption("Copy this into your firewall configuration.")
+            
+            with tab2:
+                st.text_area("IP List", "\n".join(matches), height=200)
+                
+            # Download Button
+            st.download_button(
+                label="Download ACL (.txt)",
+                data=acl_text,
+                file_name=f"azure_acl_{service_query}_{region_filter}.txt",
+                mime="text/plain"
+            )
+        else:
+             st.warning("No matching IP ranges found. Try a different service name or region.")
+    else:
+        st.info("Start by typing a service name above (e.g. 'AzureDevOps').")
+
+def render_shodan_scanner():
+    """
+    Renders the Shodan Public Attack Surface view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Uses Shodan InternetDB to scan public IPs without touching them.")
+
+    st.title("🛡️ Public Attack Surface Scanner")
+    st.markdown("Instantly see what hackers see. Powered by **Shodan**.")
+
+    # Initialize session state for IP
+    if 'shodan_ip_q' not in st.session_state:
+        st.session_state.shodan_ip_q = "1.1.1.1"
+
+    st.caption("Try a target:")
+    b_cols = st.columns(6)
+    if b_cols[0].button("Cloudflare", use_container_width=True):
+        st.session_state.shodan_ip_q = "1.1.1.1"
+        st.rerun()
+    if b_cols[1].button("Google DNS", use_container_width=True):
+        st.session_state.shodan_ip_q = "8.8.8.8"
+        st.rerun()
+    if b_cols[2].button("Quad9", use_container_width=True):
+        st.session_state.shodan_ip_q = "9.9.9.9"
+        st.rerun()
+
+    ip_address = st.text_input("Enter Public IP Address", key="shodan_ip_q")
+    
+    if st.button("Scan IP", type="primary"):
+        if not ip_address:
+            st.warning("Please enter a valid IP address.")
+            return
+
+        with st.spinner(f"Scanning {ip_address}..."):
+            data = get_shodan_data(ip_address)
+            
+        if "error" in data:
+            st.error(data['error'])
+        else:
+            st.divider()
+            
+            # Key Info
+            c1, c2, c3 = st.columns(3)
+            c1.metric("IP", data.get('ip', 'N/A'))
+            c2.metric("Hostnames", ", ".join(data.get('hostnames', [])) or "None")
+            c3.metric("Open Ports", len(data.get('ports', [])))
+            
+            # Tags
+            tags = data.get('tags', [])
+            if tags:
+                st.write("**Tags:**")
+                st.write(" ".join([f"`{t}`" for t in tags]))
+            
+            st.divider()
+
+            # Enhanced Port Visualization
+            st.subheader("Open Port Analysis")
+            ports = data.get('ports', [])
+            
+            if ports:
+                # Port Mapping
+                port_service_map = {
+                    21: ("FTP", "File Transfer"), 22: ("SSH", "Secure Shell"), 23: ("Telnet", "Unencrypted Remote"),
+                    25: ("SMTP", "Email"), 53: ("DNS", "Domain Name"), 80: ("HTTP", "Web"),
+                    110: ("POP3", "Email"), 143: ("IMAP", "Email"), 389: ("LDAP", "Directory"),
+                    443: ("HTTPS", "Secure Web"), 445: ("SMB", "Windows Share"), 3306: ("MySQL", "Database"),
+                    3389: ("RDP", "Remote Desktop"), 5432: ("PostgreSQL", "Database"), 6379: ("Redis", "Database"),
+                    8080: ("HTTP-Alt", "Web Alt"), 8443: ("HTTPS-Alt", "Secure Web Alt")
+                }
+                
+                # Buckets
+                critical_ports = []
+                web_ports = []
+                other_ports = []
+                
+                for p in ports:
+                    if p in [21, 23, 3389, 445]: # High Risk
+                        critical_ports.append(p)
+                    elif p in [80, 443, 8080, 8443]:
+                        web_ports.append(p)
+                    else:
+                        other_ports.append(p)
+
+                # Visuals
+                if critical_ports:
+                    with st.container(border=True):
+                        st.error("🚨 **CRITICAL EXPOSURE DETECTED**")
+                        cols = st.columns(4)
+                        for i, p in enumerate(critical_ports):
+                            svc, desc = port_service_map.get(p, ("Unknown", "Service"))
+                            with cols[i % 4]:
+                                st.metric(f"Port {p}", svc, desc, delta_color="inverse")
+                        st.caption("These ports should almost NEVER be open to the public internet.")
+
+                if web_ports:
+                    with st.container(border=True):
+                        st.success("🌐 **Web Services**")
+                        cols = st.columns(4)
+                        for i, p in enumerate(web_ports):
+                            svc, desc = port_service_map.get(p, ("Web", "Service"))
+                            with cols[i % 4]:
+                                st.metric(f"Port {p}", svc, desc)
+
+                if other_ports:
+                    with st.expander("🔵 Other Open Ports", expanded=True):
+                        cols = st.columns(6)
+                        for i, p in enumerate(other_ports):
+                            svc, desc = port_service_map.get(p, ("Generic", "TCP"))
+                            with cols[i % 6]:
+                                st.markdown(f"**{p}**<br><span style='font-size:0.8em; color:gray'>{svc}</span>", unsafe_allow_html=True)
+
+            else:
+                 st.success("✅ **Clean Scan**: No open ports detected by Shodan.")
+
+            # Vulns
+            vulns = data.get('vulns', [])
+            if vulns:
+                st.subheader(f"⚠️ Vulnerabilities ({len(vulns)})")
+                with st.expander("View CVE List", expanded=True):
+                    # Format as a grid of badges
+                    vuln_badges = [f"**{v}**" for v in vulns]
+                    st.write(", ".join(vuln_badges))
+            else:
+                st.info("✅ No CVEs linked to this IP in Shodan's database.")
+
+def render_subdomain_finder():
+    """
+    Renders the CRT.sh Subdomain Finder view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Queries Certificate Transparency logs to find subdomains.")
+
+    st.title("🕵️‍♂️ Shadow IT Subdomain Finder")
+    st.markdown("Find forgotten subdomains and 'Shadow IT' via CT Logs.")
+
+    # Initialize session state for Domain
+    if 'crt_domain_q' not in st.session_state:
+        st.session_state.crt_domain_q = "openai.com"
+
+    st.caption("Try a Domain:")
+    b_cols = st.columns(6)
+    if b_cols[0].button("OpenAI", use_container_width=True):
+        st.session_state.crt_domain_q = "openai.com"
+        st.rerun()
+    if b_cols[1].button("Streamlit", use_container_width=True):
+        st.session_state.crt_domain_q = "streamlit.io"
+        st.rerun()
+    if b_cols[2].button("Python", use_container_width=True):
+        st.session_state.crt_domain_q = "python.org"
+        st.rerun()
+
+    domain = st.text_input("Enter Domain Name", key="crt_domain_q")
+    
+    if st.button("Find Subdomains", type="primary"):
+        if not domain:
+             st.warning("Please enter a domain name.")
+             return
+
+        with st.spinner(f"Hunting subdomains for {domain}... (crt.sh can be slow, please wait)"):
+            results = get_crt_subdomains(domain)
+            
+        if isinstance(results, dict) and "error" in results:
+             st.error(results['error'])
+        else:
+            count = len(results)
+            st.success(f"**Found {count} Unique Subdomains**")
+            
+            if count > 0:
+                st.dataframe(pd.DataFrame(results, columns=["Subdomain"]), use_container_width=True)
+                
+                # Download
+                st.download_button(
+                    label="Download List (.txt)",
+                    data="\n".join(results),
+                    file_name=f"subdomains_{domain}.txt",
+                    mime="text/plain"
+                )
+
 def render_home():
     """
     Renders the Home page with service tiles for navigation.
@@ -1011,6 +1279,41 @@ def render_home():
             if st.button("Launch TCP", key="btn_launch_tcp", use_container_width=True):
                 st.session_state['current_view'] = 'tcp_calculator'
                 st.rerun()
+
+    # 15. Azure Ranger (Fifth column of third row)
+    with cols_row3[4]:
+         with st.container(border=True):
+            st.write("☁️")
+            st.subheader("Azure IP")
+            st.write("Service Tags to ACLs.")
+            if st.button("Launch Ranger", key="btn_launch_azure", use_container_width=True):
+                st.session_state['current_view'] = 'azure_ranger'
+                st.rerun()
+
+    # --- Row 4: Security & Recon ---
+    st.divider()
+    st.subheader("🕵️‍♂️ Security Reconnaissance")
+    cols_row4 = st.columns(5) # reusing 5 columns layout
+    
+    # 16. Shodan Scanner
+    with cols_row4[0]:
+        with st.container(border=True):
+            st.write("🛡️")
+            st.subheader("Shodan")
+            st.write("Attack Surface Scan.")
+            if st.button("Launch Scan", key="btn_launch_shodan", use_container_width=True):
+                 st.session_state['current_view'] = 'shodan_scanner'
+                 st.rerun()
+
+    # 17. Subdomain Finder
+    with cols_row4[1]:
+        with st.container(border=True):
+            st.write("🕵️‍♂️")
+            st.subheader("Subdomains")
+            st.write("Find Shadow IT.")
+            if st.button("Launch Finder", key="btn_launch_crt", use_container_width=True):
+                 st.session_state['current_view'] = 'subdomain_finder'
+                 st.rerun()
 
 def render_network_scanner():
     """
@@ -1316,6 +1619,12 @@ def main():
         render_log_extractor()
     elif st.session_state['current_view'] == 'tcp_calculator':
         render_tcp_calculator()
+    elif st.session_state['current_view'] == 'azure_ranger':
+        render_azure_ranger()
+    elif st.session_state['current_view'] == 'shodan_scanner':
+        render_shodan_scanner()
+    elif st.session_state['current_view'] == 'subdomain_finder':
+        render_subdomain_finder()
         
     # Global Features
     render_floating_ai_assistant()
