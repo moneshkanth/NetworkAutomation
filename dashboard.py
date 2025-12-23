@@ -1190,9 +1190,17 @@ def render_zerossl_manager():
                     res = create_certificate(api_key, domains, csr=final_csr)
                     
                     if "error" in res:
-                        st.error(f"Creation Failed: {res['error']}")
+                        err_type = res['error']
+                        if err_type == "certificate_limit_reached":
+                             st.error("🛑 Free Plan Limit Reached")
+                             st.warning("Your ZeroSSL account has reached its 90-day certificate limit (usually 3).")
+                             st.info("💡 Tip: Use a different API Key or upgrade your ZeroSSL plan.")
+                        else:
+                             st.error(f"Creation Failed: {err_type}")
+                        
                         if "details" in res:
-                            st.json(res['details'])
+                            with st.expander("Debug Details"):
+                                st.json(res['details'])
                     else:
                         # Success! Save to session state to display outside form
                         st.session_state.zerossl_new_key = generated_private_key
