@@ -122,6 +122,11 @@ from tcp_calculator import calculate_tcp_performance
 from tcp_calculator import calculate_tcp_performance
 from azure_ranger import fetch_azure_data_v2, get_unique_regions, filter_azure_ranges, generate_cisco_acl
 from recon_tools import get_shodan_data, get_crt_subdomains
+from recon_tools import get_shodan_data, get_crt_subdomains
+from recon_tools import get_shodan_data, get_crt_subdomains
+from recon_tools import get_shodan_data, get_crt_subdomains
+from zerossl_manager import list_certificates, get_certificate_download_link, create_certificate, generate_key_and_csr
+from vlsm_calculator import calculate_vlsm, get_free_space_summary
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
@@ -1062,12 +1067,272 @@ def render_shodan_scanner():
             else:
                 st.info("✅ No CVEs linked to this IP in Shodan's database.")
 
-def render_subdomain_finder():
+def render_zerossl_manager():
+    """
+    Renders the ZeroSSL Lifecycle Manager view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Manage your ZeroSSL Certificates via API.")
+    
+    st.title("🔐 ZeroSSL Lifecycle Manager")
+    st.markdown("Automate your certificate inventory. Connects to **ZeroSSL API**.")
+
+    # API Key Input (Pre-filled with user provided key for convenience)
+    if 'zerossl_api_key' not in st.session_state:
+        st.session_state.zerossl_api_key = "8d61b731d206e2f9d088c28c155b45dc"
+        
+    api_key = st.text_input("ZeroSSL API Key", value=st.session_state.zerossl_api_key, type="password")
+    
+    if st.button("Fetch Inventory", type="primary"):
+        if not api_key:
+            st.warning("Please enter your API Key.")
+        else:
+            st.session_state['zerossl_fetch_trigger'] = True
+
+    # Tabs for organization
+    tab1, tab2 = st.tabs(["📋 Inventory", "➕ Create Certificate"])
+
+    with tab1:
+        if st.session_state.get('zerossl_fetch_trigger'):
+             with st.spinner("Fetching certificates from ZeroSSL..."):
+                certs = list_certificates(api_key)
+                
+             if isinstance(certs, dict) and "error" in certs:
+                st.error(f"API Error: {certs['error']}")
+             else:
+                st.session_state.zerossl_api_key = api_key # Persist valid key
+                
+                count = len(certs)
+                st.success(f"Found {count} certificates.")
+                st.divider()
+                
+                if count == 0:
+                    st.info("No certificates found in this account.")
+                else:
+                    # Prepare display data
+                    display_data = []
+                    for c in certs:
+                        display_data.append({
+                            "Domain": c.get('common_name', 'Unknown'),
+                            "Status": c.get('status', 'unknown'),
+                            "Expires": c.get('expires', 'N/A'),
+                            "ID": c.get('id')
+                        })
+                    
+                    # Render Cards
+                    for item in display_data:
+                        with st.container(border=True):
+                            c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+                            with c1:
+                                st.subheader(item['Domain'])
+                                st.caption(f"ID: {item['ID']}")
+                            with c2:
+                                status = item['Status']
+                                if status == 'issued': st.success(f"✅ {status.upper()}")
+                                elif status == 'pending_validation': st.warning(f"⏳ {status.upper()}")
+                                elif status in ['expired', 'cancelled', 'revoked']: st.error(f"🔴 {status.upper()}")
+                                else: st.info(f"{status.upper()}")
+                            with c3:
+                                st.write(f"**Expires:** {item['Expires']}")
+                            with c4:
+                                if item['Status'] == 'issued':
+                                    st.write("📥 Ready")
+                                else:
+                                    st.write("---")
+
+    with tab2:
+        st.subheader("Issue New Certificate")
+        st.info("Create a new 90-Day Certificate via ZeroSSL.")
+        
+        # Initialize session state for the newly created key if not present
+        if 'zerossl_new_key' not in st.session_state:
+            st.session_state.zerossl_new_key = None
+            st.session_state.zerossl_new_csr = None
+            st.session_state.zerossl_last_res = None
+            st.session_state.zerossl_last_domain = None
+
+        with st.form("create_cert_form"):
+            domains_input = st.text_input("Domain Name(s)", placeholder="example.com, www.example.com")
+            csr_input = st.text_area("CSR (Certificate Signing Request) - Optional", placeholder="-----BEGIN CERTIFICATE REQUEST-----...", height=150)
+            validity = st.selectbox("Validity", ["90 Days"], disabled=True)
+            
+            submitted = st.form_submit_button("Create Certificate")
+            
+        if submitted:
+            if not domains_input:
+                st.error("Please enter at least one domain.")
+            elif not api_key:
+                st.error("Please enter your API Key above.")
+            else:
+                with st.spinner("Communicating with ZeroSSL Authority..."):
+                    # Clean domains
+                    domains = domains_input.replace(" ", "")
+                    
+                    # Validate/Sanitize CSR
+                    final_csr = None
+                    generated_private_key = None
+                    
+                    if csr_input and len(csr_input.strip()) > 10 and "-----BEGIN" in csr_input:
+                        final_csr = csr_input.strip()
+                    else:
+                        st.info("Generating 2048-bit RSA Key & CSR locally...")
+                        try:
+                            common_name = domains.split(',')[0].strip()
+                            generated_private_key, final_csr = generate_key_and_csr(common_name)
+                        except Exception as e:
+                            st.error(f"Failed to generate CSR: {e}")
+                            st.stop()
+
+                    res = create_certificate(api_key, domains, csr=final_csr)
+                    
+                    if "error" in res:
+                        st.error(f"Creation Failed: {res['error']}")
+                        if "details" in res:
+                            st.json(res['details'])
+                    else:
+                        # Success! Save to session state to display outside form
+                        st.session_state.zerossl_new_key = generated_private_key
+                        st.session_state.zerossl_new_csr = final_csr
+                        st.session_state.zerossl_last_res = res
+                        st.session_state.zerossl_last_domain = domains.split(',')[0]
+                        st.rerun() # Rerun to show results below
+
+        # Display Result (Outside Form)
+        if st.session_state.zerossl_last_res:
+             res = st.session_state.zerossl_last_res
+             st.divider()
+             st.balloons()
+             st.success(f"Certificate Created Successfully! ID: {res.get('id')}")
+             
+             # Show Private Key if we generated it
+             if st.session_state.zerossl_new_key:
+                 st.warning("⚠️ **IMPORTANT**: Save this Private Key! It is not stored in ZeroSSL.")
+                 priv_key = st.session_state.zerossl_new_key
+                 st.code(priv_key, language="text")
+                 st.download_button("Download Private Key (.key)", priv_key, file_name=f"{st.session_state.zerossl_last_domain}.key")
+             
+             with st.expander("Raw API Response"):
+                 st.json(res)
+             
+             st.info("Navigate to Inventory to see status or complete validation.")
+             
+             if st.button("Clear Results"):
+                 st.session_state.zerossl_new_key = None
+                 st.session_state.zerossl_last_res = None
+                 st.rerun()
+
+def render_vlsm_architect():
+    """
+    Renders the VLSM Subnet Architect view.
+    """
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Recursive VLSM Allocation.")
+        st.write("1. Inputs Root Network.")
+        st.write("2. Inputs Requirements.")
+        st.write("3. Sorts & Allocates.")
+    
+    st.title("📐 VLSM Subnet Architect")
+    st.markdown("Automated Variable Length Subnet Masking calculator. Allocates subnets based on host requirements.")
+    
+    # 1. Root Network Input
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        root_cidr = st.text_input("Root Network (CIDR)", "192.168.0.0/24")
+    
+    st.divider()
+    
+    # 2. Dynamic Requirements Input
+    st.subheader("Subnet Requirements")
+    st.caption("Add rows for each VLAN/Subnet you need.")
+    
+    if 'vlsm_reqs' not in st.session_state:
+        # Default starting data
+        st.session_state.vlsm_reqs = pd.DataFrame([
+            {"Subnet Name": "VLAN_HR", "Hosts Needed": 50},
+            {"Subnet Name": "VLAN_Dev", "Hosts Needed": 12},
+            {"Subnet Name": "VLAN_Mgmt", "Hosts Needed": 5},
+        ])
+
+    # CONFIG: Data Editor for interactive table
+    edited_df = st.data_editor(
+        st.session_state.vlsm_reqs,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Subnet Name": st.column_config.TextColumn("Subnet Name", required=True),
+            "Hosts Needed": st.column_config.NumberColumn("Hosts Needed", min_value=1, max_value=100000, required=True, step=1)
+        },
+        key="vlsm_editor"
+    )
+    
+    if st.button("Calculate Allocation", type="primary"):
+        # Convert Editor Data to List of Dicts
+        requirements = edited_df.to_dict(orient="records")
+        
+        # Clean keys to match expected logic (The editor keys match display, so we map them if needed)
+        # Our logic expects 'name' and 'hosts', or we update logic to use specific keys.
+        # Let's map strict keys for the function
+        mapped_reqs = []
+        for r in requirements:
+            if r.get("Subnet Name") and r.get("Hosts Needed"):
+                mapped_reqs.append({
+                    "name": r.get("Subnet Name"),
+                    "hosts": r.get("Hosts Needed")
+                })
+        
+        if not mapped_reqs:
+            st.warning("Please add at least one requirement.")
+            return
+            
+        with st.spinner("Crunching numbers (sorting, powering, allocating)..."):
+            df_result, error = calculate_vlsm(root_cidr, mapped_reqs)
+            
+        if error:
+            st.error(error)
+        else:
+            # Display Results
+            st.success("Allocation Successful!")
+            
+            # 1. Summary Metrics (Free vs Used)
+            stats = get_free_space_summary(root_cidr, df_result)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total IPs", stats.get('Total IPs', 0))
+            m2.metric("Allocated IPs", stats.get('Used IPs', 0))
+            m3.metric("Free IPs", stats.get('Free IPs', 0), delta_color="normal")
+            
+            # 2. Visualization (Stacked Bar for Capacity)
+            # Reshape for custom colors: Columns = [Allocated, Free]
+            chart_data = pd.DataFrame([
+                [stats.get('Used IPs', 0), stats.get('Free IPs', 0)]
+            ], columns=["Allocated", "Free"])
+            
+            st.bar_chart(chart_data, color=["#FF4B4B", "#00CC96"]) # Red=Allocated, Green=Free
+            
+            # 3. Detailed Table
+            st.subheader("Allocation Table")
+            st.dataframe(
+                df_result,
+                use_container_width=True,
+                column_config={
+                    "Utilization %": st.column_config.ProgressColumn(
+                        "Utilization %", format="%.1f%%", min_value=0, max_value=100
+                    ),
+                    "CIDR": st.column_config.TextColumn("CIDR", help="Assigned Subnet Mask"),
+                }
+            )
     """
     Renders the CRT.sh Subdomain Finder view.
     """
     with st.sidebar:
-        if st.button("← Back to Home"):
+        if st.button("← Back to Home", key="btn_back_vlsm"):
             st.session_state['current_view'] = 'home'
             st.rerun()
         st.divider()
@@ -1175,9 +1440,13 @@ def render_home():
         with st.container(border=True):
             st.write("🔢")
             st.subheader("Subnet Calc")
-            st.write("Calculate CIDR masks, broadcast, and IP address ranges.")
-            if st.button("Launch Calculator", key="btn_launch_subnet", use_container_width=True):
+            st.write("Basic Calc.")
+            if st.button("Launch", key="btn_launch_subnet", use_container_width=True):
                 st.session_state['current_view'] = 'subnet_calc'
+                st.rerun()
+            st.write("Advance VLSM")
+            if st.button("Architect", key="btn_launch_vlsm", use_container_width=True):
+                st.session_state['current_view'] = 'vlsm_architect'
                 st.rerun()
 
     # Row 2: 5 Columns (to keep width consistent)
@@ -1313,6 +1582,16 @@ def render_home():
             st.write("Find Shadow IT.")
             if st.button("Launch Finder", key="btn_launch_crt", use_container_width=True):
                  st.session_state['current_view'] = 'subdomain_finder'
+                 st.rerun()
+
+    # 18. ZeroSSL Manager
+    with cols_row4[2]:
+        with st.container(border=True):
+            st.write("🔐")
+            st.subheader("ZeroSSL")
+            st.write("Manage Certificates.")
+            if st.button("Launch Manager", key="btn_launch_zerossl", use_container_width=True):
+                 st.session_state['current_view'] = 'zerossl_manager'
                  st.rerun()
 
 def render_network_scanner():
@@ -1625,6 +1904,10 @@ def main():
         render_shodan_scanner()
     elif st.session_state['current_view'] == 'subdomain_finder':
         render_subdomain_finder()
+    elif st.session_state['current_view'] == 'zerossl_manager':
+        render_zerossl_manager()
+    elif st.session_state['current_view'] == 'vlsm_architect':
+        render_vlsm_architect()
         
     # Global Features
     render_floating_ai_assistant()
