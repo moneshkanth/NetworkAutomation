@@ -13,9 +13,24 @@ def get_ai_response(prompt):
         str: The AI's answer or an error message.
     """
     try:
-        api_key = st.secrets["openrouter"]["api_key"]
+        # Try finding it in [openrouter] section first
+        if "openrouter" in st.secrets and "api_key" in st.secrets["openrouter"]:
+            api_key = st.secrets["openrouter"]["api_key"]
+        # Fallback to flat key (easier for some cloud configs)
+        elif "openrouter_api_key" in st.secrets:
+            api_key = st.secrets["openrouter_api_key"]
+        else:
+            raise ValueError("Key not found")
+            
     except Exception:
-        return "⚠️ API Key missing. Please set [openrouter] api_key in .streamlit/secrets.toml"
+        return (
+            "⚠️ **API Key Missing**\n\n"
+            "**For Local:** Add to `.streamlit/secrets.toml`:\n"
+            "```toml\n[openrouter]\napi_key = 'sk-or-v1...'\n```\n\n"
+            "**For Web App (Streamlit Cloud):**\n"
+            "1. Go to 'Manage App' -> 'Settings' -> 'Secrets'\n"
+            "2. Paste the TOML above."
+        )
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     
