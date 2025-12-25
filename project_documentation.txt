@@ -283,3 +283,51 @@ This document provides a deep dive into every tool built for the "Network Automa
 > 2.  Query `https://crt.sh/?q=%.{domain}&output=json`.
 > 3.  **Crucial**: Add a try/except block. If crt.sh times out (502 error), failover to `api.hackertarget.com`.
 > 4.  Process results to return only unique subdomains."
+
+## 🤖 18. AI Network Assistant
+**Built Logic**: 
+- API Consumer: **OpenRouter API** (NVIDIA Nemotron Model).
+- **Secrets Management**: Supports both nested TOML (`[openrouter]`) and flat keys for easy Cloud deployment.
+- **Context Awareness**: Pre-prompted to act as a Network Engineer ("You are an expert...").
+- **UI**: Implemented as a "Floating Action Button" (FAB) using Custom CSS injection + `st.popover`.
+**Use Case**: 
+- **Triage**: "What does Error 404 mean?"
+- **Guidance**: "How do I configure OSPF on a Cisco router?"
+**Detailed Prompt**:
+> "Add an AI Assistant to `dashboard.py`.
+> 1.  Create `ai_assistant.py` that calls OpenRouter API.
+> 2.  Import it into `dashboard.py`.
+> 3.  **UI Challenge**: Create a floating 'Chat' button in the bottom-right corner using CSS: `position: fixed; bottom: 30px; right: 30px`.
+> 4.  Use `st.popover` to open the chat window when clicked."
+
+## 🔐 19. ZeroSSL Lifecycle Manager
+**Built Logic**: 
+- API Consumer: **ZeroSSL API** (`api.zerossl.com`).
+- **Cryptography**: Uses Python's `cryptography` library to generate **2048-bit RSA Private Keys** and **CSRs** (Certificate Signing Requests) locally on the client (server-side stream).
+- **Error Handling**: Catches specific API error `2817` (Limit Reached) to give helpful advice.
+**Use Case**: 
+- **DevOps**: Instantly minting a 90-day SSL certificate for a dev server.
+- **Security**: Avoiding "insecure" warnings on internal tools.
+**Detailed Prompt**:
+> "Create a `zerossl_manager.py` tool.
+> 1.  Tabs: 'Inventory' (List certs via API) and 'Create' (Issue new).
+> 2.  **Auto-Generator**: If the user doesn't provide a CSR, generate a Private Key and CSR locally using `cryptography`.
+> 3.  **Critical UI**: Display the generated Private Key ONCE with a download button.
+> 4.  Call ZeroSSL API to create the cert."
+
+## 📐 20. VLSM Subnet Architect
+**Built Logic**: 
+- **Recursive Algorithm**:
+    1.  Sorts requirements (Largest Hosts -> Smallest).
+    2.  Calculates necessary subnet size (`math.ceil(log2(hosts+2))`).
+    3.  Allocates sequentially from the Root Network.
+- **Visualization**: Stacked Bar Chart (Custom Colors: Red/Green) showing Capacity vs Usage.
+**Use Case**: 
+- **Network Design**: Planning a new office building (Voice VLAN: 200 hosts, Data: 200, Mgmt: 10).
+- **Efficiency**: Maximizing IP usage without wasting address space.
+**Detailed Prompt**:
+> "Create a `vlsm_calculator.py` tool.
+> 1.  Input: Root Network (CIDR).
+> 2.  Input: Dynamic Table (`st.data_editor`) for Subnet Requirements (Name, Hosts Needed).
+> 3.  **Algorithm**: Sort requirements descending. Recursively allocate the smallest fitting CIDR block.
+> 4.  Display a Table of results and a Stacked Bar Chart showing 'Allocated' vs 'Free' space."

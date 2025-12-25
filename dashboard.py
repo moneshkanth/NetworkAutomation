@@ -127,6 +127,7 @@ from recon_tools import get_shodan_data, get_crt_subdomains
 from recon_tools import get_shodan_data, get_crt_subdomains
 from zerossl_manager import list_certificates, get_certificate_download_link, create_certificate, generate_key_and_csr
 from vlsm_calculator import calculate_vlsm, get_free_space_summary
+from utility_tools import calculate_azure_egress, convert_optical_power, exclude_subnets
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
@@ -1336,9 +1337,78 @@ def render_vlsm_architect():
                     "CIDR": st.column_config.TextColumn("CIDR", help="Assigned Subnet Mask"),
                 }
             )
-    """
-    Renders the CRT.sh Subdomain Finder view.
-    """
+            
+def render_azure_cost():
+    """Renders Azure Egress Cost Calculator."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_azure_cost"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+    
+    st.title("💸 Azure Data Egress Calculator")
+    st.markdown("Estimate bandwidth costs based on standard Azure Internet Egress rates.")
+    
+    c1, c2 = st.columns(2)
+    amount = c1.number_input("Amount", min_value=0.0, value=1.0, step=0.1)
+    unit = c2.selectbox("Unit", ["GB", "TB"])
+    
+    if st.button("Calculate Cost", type="primary"):
+        input_gb = amount if unit == "GB" else amount * 1024
+        result = calculate_azure_egress(input_gb)
+        
+        st.divider()
+        st.metric("Total Estimated Cost", f"${result['total_cost']}")
+        
+        st.subheader("Cost Breakdown")
+        st.dataframe(pd.DataFrame(result['breakdown']), use_container_width=True)
+
+def render_optical_converter():
+    """Renders Optical Power Converter."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_optical"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+            
+    st.title("🔦 Optical Power Converter")
+    st.markdown("Convert between dBm and mW for fiber optic signals.")
+    
+    c1, c2 = st.columns(2)
+    val = c1.number_input("Signal Strength", value=-3.0, step=0.1, format="%.2f")
+    unit = c2.selectbox("From Unit", ["dBm", "mW"])
+    
+    st.divider()
+    
+    res = convert_optical_power(val, unit)
+    if "error" in res:
+        st.error(res['error'])
+    else:
+        st.success(f"Converted: {res['output_val']:.4f} {res['output_unit']}")
+        st.metric("Input", res['input'])
+        
+    st.info("ℹ️ **Reference**: 10G-SR Healthy Range: -3 dBm to -9.9 dBm (RX)")
+
+def render_ip_subtractor():
+    """Renders IP Subtractor Tool."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_ip_sub"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+            
+    st.title("➖ IP Subtractor")
+    st.markdown("Exclude a subnet from a Supernet standardly.")
+    
+    c1, c2 = st.columns(2)
+    supernet = c1.text_input("Supernet (e.g., 10.0.0.0/8)", "10.0.0.0/8")
+    exclude = c2.text_input("Exclude (e.g., 10.1.0.0/16)", "10.1.0.0/16")
+    
+    if st.button("Calculate Remaining", type="primary"):
+        remaining, err = exclude_subnets(supernet, exclude)
+        
+        if err:
+            st.error(err)
+        else:
+            st.success(f"Result: {len(remaining)} Subnets Remaining")
+            st.code("\n".join(remaining), language="text")
     with st.sidebar:
         if st.button("← Back to Home", key="btn_back_vlsm"):
             st.session_state['current_view'] = 'home'
@@ -1600,6 +1670,41 @@ def render_home():
             st.write("Manage Certificates.")
             if st.button("Launch Manager", key="btn_launch_zerossl", use_container_width=True):
                  st.session_state['current_view'] = 'zerossl_manager'
+                 st.rerun()
+
+    # --- Row 5: Utilities ---
+    st.divider()
+    st.subheader("🛠️ Utilities")
+    cols_row5 = st.columns(5)
+    
+    # 19. Azure Cost
+    with cols_row5[0]:
+        with st.container(border=True):
+            st.write("💸")
+            st.subheader("Azure Cost")
+            st.write("Egress Calc.")
+            if st.button("Launch", key="btn_launch_azure_cost", use_container_width=True):
+                 st.session_state['current_view'] = 'azure_cost'
+                 st.rerun()
+                 
+    # 20. Optical Converter
+    with cols_row5[1]:
+        with st.container(border=True):
+            st.write("🔦")
+            st.subheader("Optical")
+            st.write("dBm <-> mW.")
+            if st.button("Launch", key="btn_launch_optical", use_container_width=True):
+                 st.session_state['current_view'] = 'optical_converter'
+                 st.rerun()
+
+    # 21. IP Subtractor
+    with cols_row5[2]:
+        with st.container(border=True):
+            st.write("➖")
+            st.subheader("IP Sub")
+            st.write("Exclude Subnets.")
+            if st.button("Launch", key="btn_launch_ip_sub", use_container_width=True):
+                 st.session_state['current_view'] = 'ip_subtractor'
                  st.rerun()
 
 def render_network_scanner():
@@ -1916,6 +2021,12 @@ def main():
         render_zerossl_manager()
     elif st.session_state['current_view'] == 'vlsm_architect':
         render_vlsm_architect()
+    elif st.session_state['current_view'] == 'azure_cost':
+        render_azure_cost()
+    elif st.session_state['current_view'] == 'optical_converter':
+        render_optical_converter()
+    elif st.session_state['current_view'] == 'ip_subtractor':
+        render_ip_subtractor()
         
     # Global Features
     render_floating_ai_assistant()
