@@ -111,7 +111,7 @@ from dns_propagator import check_dns_propagation
 from subnet_calculator import calculate_subnet_details
 from latency_analyzer import analyze_latency
 from ai_assistant import get_ai_response
-from config_generator import generate_configs
+from config_generator import generate_configs, generate_bulk_configs
 from network_linter import lint_config
 from route_optimizer import optimize_routes
 from topology_mapper import generate_topology_dot
@@ -127,7 +127,66 @@ from recon_tools import get_shodan_data, get_crt_subdomains
 from recon_tools import get_shodan_data, get_crt_subdomains
 from zerossl_manager import list_certificates, get_certificate_download_link, create_certificate, generate_key_and_csr
 from vlsm_calculator import calculate_vlsm, get_free_space_summary
-from utility_tools import calculate_azure_egress, convert_optical_power, exclude_subnets
+from utility_tools import calculate_azure_egress, convert_optical_power, exclude_subnets, calculate_mtu_overhead
+from config_sanitizer import sanitize_config
+
+def render_config_sanitizer():
+    """Renders the Configuration Sanitizer page."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Redact sensitive info like passwords, public IPs, and MACs.")
+
+    st.title("🧹 Configuration Sanitizer")
+    st.markdown("Scrub sensitive data from your configuration files before sharing.")
+
+    # Input Area
+    raw_text = st.text_area("Raw Configuration/Log", height=200)
+
+    # Options
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        redact_passwords_opt = st.checkbox("Remove Passwords/Secrets", value=True)
+    with col2:
+        # Public IPs only (keep 10.x, 192.168.x)
+        redact_public_ips_opt = st.checkbox("Remove Public IPs")
+    with col3:
+        redact_macs_opt = st.checkbox("Remove MAC Addresses")
+    with col4:
+        redact_snmp_opt = st.checkbox("Remove SNMP Strings")
+
+    if st.button("Sanitize Config", type="primary"):
+        if not raw_text:
+            st.warning("Please enter some text to sanitize.")
+        else:
+            options = {
+                "passwords": redact_passwords_opt,
+                "public_ips": redact_public_ips_opt,
+                "mac_addresses": redact_macs_opt,
+                "snmp": redact_snmp_opt
+            }
+            
+            clean_text = sanitize_config(raw_text, options)
+            
+            st.divider()
+            
+            # Side-by-Side Diff
+            st.subheader("Changes Made (Diff)")
+            # Reusing generate_html_diff from config_diff import which is already imported
+            html_diff = generate_html_diff(raw_text, clean_text)
+            if html_diff:
+                 st.components.v1.html(html_diff, height=400, scrolling=True)
+            else:
+                 st.info("No sensitive data found matching selected filters.")
+            
+            st.subheader("Clean Configuration")
+            st.text_area("Copy Clean Config", value=clean_text, height=200)
+            
+            # Download button for convenience?
+            st.download_button("Download Clean Config", clean_text, file_name="sanitized_config.txt")
+
 
 def save_config_history(old_cfg, new_cfg):
     """Saves config comparison to history."""
@@ -182,6 +241,224 @@ def load_ssl_results():
         except:
             return []
     return []
+
+from config_sanitizer import sanitize_config
+from voip_calculator import calculate_voip_bandwidth, calculate_video_bandwidth
+
+def render_voip_calculator():
+    """Renders the VoIP & Video Bandwidth Calculator."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Plan bandwidth for Voice (VoIP) and Video Conferencing.")
+
+    st.title("📞 VoIP & Video Bandwidth Planner")
+    st.markdown("Estimate WAN capacity requirements including critical protocol overheads.")
+
+    tab1, tab2 = st.tabs(["🎙️ Voice (VoIP)", "📹 Video Conferencing"])
+
+    with tab1:
+        c1, c2 = st.columns(2)
+        with c1:
+             num_calls = st.slider("Number of Concurrent Calls", 1, 1000, 100)
+             codec = st.selectbox("Codec", ["G.711 (64kbps)", "G.729 (8kbps)", "Opus (Wideband)"])
+        
+        with c2:
+             st.subheader("Overhead Options")
+             include_l2 = st.checkbox("Include Layer 2 (Ethernet) Header", value=True, help="Adds 38 bytes (Header+FCS+Preamble+IPG)")
+             use_vpn = st.checkbox("Include IPSec VPN Overhead", value=False, help="Adds ~50 bytes for ESP/Tunneling")
+             c_rtp = st.checkbox("Use cRTP (Compressed RTP)", value=False, help="Reduces IP/UDP/RTP from 40B to ~4B")
+
+        if st.button("Calculate VoIP Bandwidth", type="primary"):
+            results = calculate_voip_bandwidth(num_calls, codec, include_l2, use_vpn, c_rtp)
+            
+            st.divider()
+            
+            # Big Metrics
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Bandwidth", f"{results['total_bandwidth_mbps']:.2f} Mbps")
+            m2.metric("Total PPS", f"{results['pps']:,.0f}")
+            m3.metric("Bandwidth per Call", f"{results['bandwidth_bps_per_call']/1000:.1f} kbps")
+            
+            # Comparison Chart (Payload vs Overhead)
+            st.subheader("Packet Composition (Bytes)")
+            breakdown = results['breakdown']
+            chart_df = pd.DataFrame([breakdown])
+            st.bar_chart(chart_df, color=["#36a2eb", "#ff6384", "#4bc0c0", "#ff9f40"])
+            
+            st.caption("Notice how much overhead (L2/L3) adds compared to the actual Voice Payload, especially for G.729!")
+
+    with tab2:
+        c1, c2 = st.columns(2)
+        with c1:
+            vid_calls = st.slider("Concurrent Video Sessions", 1, 100, 10)
+        with c2:
+            quality = st.selectbox("Video Quality", ["720p HD", "1080p FHD", "4K UHD", "Standard (480p)"])
+            
+        if st.button("Calculate Video Bandwidth"):
+            v_res = calculate_video_bandwidth(vid_calls, quality)
+            
+            st.divider()
+            st.metric("Total Video Bandwidth", f"{v_res['total_bandwidth_mbps']:.2f} Mbps")
+            st.info(f"Assuming ~{v_res['per_call_mbps']} Mbps per stream.")
+
+from ipv6_master import analyze_ipv6
+
+def render_ipv6_master():
+    """Renders the IPv6 Master Tool."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Expand, Compress, and Analyze IPv6 Addresses.")
+
+    st.title("🌐 IPv6 Master Tool")
+    st.markdown("Demystify the 128-bit address space.")
+
+    # Input
+    ipv6_input = st.text_input("Enter IPv6 Address", "2001:db8::1", help="e.g. 2001:db8::1, fe80::1")
+
+    if ipv6_input:
+        result = analyze_ipv6(ipv6_input)
+        
+        if "error" in result:
+             st.error(f"❌ {result['error']}")
+        else:
+             st.success("✅ Valid IPv6 Address")
+             st.divider()
+             
+             # Main Card
+             with st.container(border=True):
+                 c1, c2 = st.columns(2)
+                 with c1:
+                     st.write("**Address Type**")
+                     st.subheader(f"🏷️ {result['type']}")
+                 with c2:
+                      st.write("**Description**")
+                      st.info(result['description'])
+             
+             st.divider()
+             
+             # Formats
+             st.subheader("Formats")
+             
+             st.caption("Compressed (Canonical)")
+             st.code(result['compressed'], language='text')
+             
+             st.caption("Exploded (Full 32 Hex Characters)")
+             st.code(result['exploded'], language='text')
+             
+             # Details
+             with st.expander("Technical Details"):
+                 st.write(f"**Multicast:** {result['is_multicast']}")
+                 st.write(f"**Private (Unique Local):** {result['is_private']}")
+                 st.write(f"**Global Unicast:** {result['is_global']}")
+                 st.write(f"**Link-Local:** {result['is_link_local']}")
+                 st.write(f"**Loopback:** {result['is_loopback']}")
+
+from log_cost_estimator import calculate_log_cost
+
+def render_log_cost_estimator():
+    """Renders the Log Storage & Observability Cost Estimator."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Estimate Monthly Bills for Datadog, Splunk, or S3 Logging.")
+
+    st.title("💸 Log Cost Estimator")
+    st.markdown("Avoid sticker shock by estimating observability costs.")
+
+    # Tiers
+    tiers = {
+        "SaaS Enterprise (High Ingest)": {"ingestion_rate": 2.50, "storage_rate": 0.10, "included_retention": 7, "name": "SaaS Enterprise"},
+        "SaaS Standard (Datadog/NewRelic avg)": {"ingestion_rate": 1.70, "storage_rate": 0.10, "included_retention": 7, "name": "SaaS Standard"},
+        "DIY / Cloud Storage (S3 Standard)": {"ingestion_rate": 0.00, "storage_rate": 0.023, "included_retention": 0, "name": "AWS S3 Standard"},
+        "DIY / High Performance (EBS/SSD)": {"ingestion_rate": 0.00, "storage_rate": 0.10, "included_retention": 0, "name": "Self-Hosted SSD"},
+    }
+    
+    col_config, col_results = st.columns([1, 1])
+    
+    with col_config:
+        st.subheader("Parameters")
+        tier_name = st.selectbox("Pricing Model", list(tiers.keys()))
+        selected_tier = tiers[tier_name]
+        
+        daily_gb = st.slider("Daily Ingestion (GB)", 1, 5000, 100)
+        retention_days = st.select_slider("Retention Period (Days)", options=[7, 14, 30, 60, 90, 180, 365, 730], value=30)
+        
+        st.caption(f"**Rate Info:** Ingest ${selected_tier['ingestion_rate']}/GB, Storage ${selected_tier['storage_rate']}/GB/mo")
+
+    with col_results:
+        st.subheader("Estimated Monthly Cost")
+        
+        # Calculation
+        res = calculate_log_cost(daily_gb, retention_days, selected_tier)
+        
+        # Big metric
+        st.metric("Total Monthly Bill", f"${res['total_monthly_cost']:,.2f}")
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Ingestion Cost", f"${res['ingestion_cost']:,.2f}")
+        c2.metric("Storage Cost", f"${res['storage_cost']:,.2f}")
+        
+        # Chart
+        chart_data = pd.DataFrame([
+            {"Category": "Ingestion", "Cost": res['ingestion_cost']},
+            {"Category": "Storage", "Cost": res['storage_cost']}
+        ])
+        st.bar_chart(chart_data.set_index("Category"))
+        
+        if res['total_monthly_cost'] > 10000:
+             st.warning("⚠️ High Cost Alert! Consider moving old logs to Cold Storage (S3 Glacier).")
+
+from disk_calculator import calculate_disk_performance
+
+def render_disk_calculator():
+    """Renders the Cloud Disk Performance Calculator."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Simulate AWS GP3 and Azure Premium SSD performance limitations.")
+
+    st.title("💾 Cloud Disk Performance")
+    st.markdown("Avoid throttling by sizing your disks correctly.")
+
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        provider = st.selectbox("Cloud Provider / Disk Type", ["AWS GP3", "Azure Premium SSD"])
+        
+    with col2:
+        size = st.number_input("Disk Size (GB)", min_value=1, max_value=32768, value=128, step=10)
+
+    if st.button("Calculate Limits"):
+        res = calculate_disk_performance(size, provider)
+        
+        st.divider()
+        st.subheader("Performance Limits")
+        
+        m1, m2 = st.columns(2)
+        m1.metric("Max IOPS", f"{res['iops']:,}")
+        m2.metric("Max Throughput", f"{res['throughput_mbps']} MB/s")
+        
+        if res['notes']:
+            st.info(f"ℹ️ {res['notes']}")
+        
+        # Visual Gauge (using progress bar as simple linear gauge)
+        st.write("IOPS Utilization Visual (Scale: 0 - 20,000)")
+        iops_norm = min(res['iops'] / 20000, 1.0)
+        st.progress(iops_norm)
+        
+        st.write("Throughput Utilization Visual (Scale: 0 - 1,000 MB/s)")
+        through_norm = min(res['throughput_mbps'] / 1000, 1.0)
+        st.progress(through_norm)
 
 def render_config_comparator():
     # Load history state if clicked
@@ -1409,8 +1686,134 @@ def render_ip_subtractor():
         else:
             st.success(f"Result: {len(remaining)} Subnets Remaining")
             st.code("\n".join(remaining), language="text")
+
+def render_mtu_calculator():
+    """Renders Safe MTU & Tunnel Overhead Calculator."""
     with st.sidebar:
-        if st.button("← Back to Home", key="btn_back_vlsm"):
+        if st.button("← Back to Home", key="btn_back_mtu"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+            
+    st.title("🚛 MTU & Tunnel Overhead Calculator")
+    st.markdown("Calculate safe MTU and MSS to prevent packet fragmentation.")
+    
+    # Inputs
+    c1, c2 = st.columns(2)
+    phys_mtu = c1.number_input("Physical Interface MTU", value=1500, step=1)
+    
+    overheads = {
+        "GRE (Generic Routing headers)": 24,
+        "GRE + IPsec (Standard VPN)": 56,
+        "VXLAN (Data Center Overlay)": 50,
+        "WireGuard (Modern VPN)": 60,
+        "IPIP (IP in IP Tunnel)": 20
+    }
+    
+    protocol = c2.selectbox("Tunnel Protocol", list(overheads.keys()))
+    overhead_val = overheads[protocol]
+    
+    st.divider()
+    
+    # Calculation
+    res = calculate_mtu_overhead(phys_mtu, overhead_val)
+    safe_mtu = res['safe_mtu']
+    mss = res['mss']
+    
+    # Metrics
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Tunnel Overhead", f"{overhead_val} bytes", delta_color="inverse")
+    m2.metric("Safe Tunnel MTU", f"{safe_mtu} bytes", delta="Best Practice", delta_color="normal")
+    m3.metric("Recommended MSS", f"{mss} bytes", "Use this value")
+    
+    # Visual Bar Chart (Packet Anatomy)
+    st.subheader("Packet Anatomy")
+    
+    # Create a DataFrame for the stacked bar
+    # We want a single horizontal bar composed of 3 segments
+    chart_data = pd.DataFrame({
+        "Bytes": [res['breakdown']['Payload (MSS)'], res['breakdown']['TCP/IP Headers'], res['breakdown']['Tunnel Overhead']],
+        "Segment": ["Payload (MSS)", "TCP/IP Headers", "Tunnel Overhead"],
+        "Type": ["Packet"] * 3 # Dummy column for grouping
+    })
+    
+    st.bar_chart(chart_data, x="Bytes", y="Type", color="Segment", horizontal=True, stack=True)
+    
+    # Config Snippet
+    st.subheader("Configuration Snippet")
+    st.markdown("Apply this to your **Tunnel Interface**:")
+    config = f"""interface Tunnel100
+ ip mtu {safe_mtu}
+ ip tcp adjust-mss {mss}"""
+    st.code(config, language="network")
+
+def render_bulk_factory():
+    """Renders the Bulk Config Factory (CSV + Jinja2)."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_bulk"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+            
+    st.title("🏭 Bulk Config Factory")
+    st.markdown("Generate hundreds of configs using **CSV Data** and **Jinja2 Templates**.")
+    
+    # 1. Template Input
+    st.subheader("1. Template (Jinja2)")
+    default_template = """hostname {{ hostname }}
+interface GigabitEthernet1/0/1
+ description Link to {{ site_name }}
+ ip address {{ ip_address }} 255.255.255.0
+ no shutdown"""
+    template_str = st.text_area("Paste Template Here", value=default_template, height=200, key="bulk_template_input")
+    
+    # 2. Data Source
+    st.subheader("2. Data Source (CSV)")
+    
+    # Sample CSV
+    sample_csv = "hostname,site_name,ip_address\nRouter1,NYC_HQ,192.168.10.1\nRouter2,LA_Branch,192.168.20.1"
+    st.download_button("📥 Download Sample CSV", sample_csv, "template.csv", "text/csv")
+    
+    uploaded_file = st.file_uploader("Upload CSV File (Headers must match template variables)", type=['csv'])
+    
+    if uploaded_file:
+        try:
+            df = pd.read_csv(uploaded_file)
+            st.success(f"Loaded {len(df)} rows. Columns: {', '.join(df.columns)}")
+            
+            # Show data preview
+            with st.expander("View Data Preview"):
+                st.dataframe(df.head())
+            
+            # Action Button
+            if st.button("🚀 Generate Configs", type="primary"):
+                with st.spinner("Rendering templates..."):
+                    zip_buffer, preview_list = generate_bulk_configs(template_str, df)
+                    
+                    st.divider()
+                    st.subheader("3. Result Preview")
+                    
+                    # Preview Tabs
+                    if preview_list:
+                        tabs = st.tabs([p['filename'] for p in preview_list])
+                        for i, tab in enumerate(tabs):
+                            with tab:
+                                st.code(preview_list[i]['content'])
+                    
+                    # Download Button
+                    st.download_button(
+                        label="📦 Download All Configs (.zip)",
+                        data=zip_buffer,
+                        file_name="bulk_configs.zip",
+                        mime="application/zip",
+                        type="primary"
+                    )
+                    
+        except Exception as e:
+            st.error(f"Error reading CSV: {e}")
+
+def render_subdomain_finder():
+    """Renders the Shadow IT Subdomain Finder."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_subdomain"):
             st.session_state['current_view'] = 'home'
             st.rerun()
         st.divider()
@@ -1462,250 +1865,114 @@ def render_ip_subtractor():
                     mime="text/plain"
                 )
 
+def inject_custom_css():
+    """Injects custom CSS for UI polish."""
+    st.markdown("""
+        <style>
+        /* Hide Streamlit Branding */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        
+        /* Card Styling */
+        div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
+            background-color: #f9f9f9;
+            border-radius: 10px;
+            padding: 10px;
+        }
+        
+        /* Modern Button Hover */
+        button[kind="secondary"]:hover {
+            border-color: #FF4B4B !important;
+            color: #FF4B4B !important;
+        }
+        
+        /* Metrics container */
+        [data-testid="stMetricValue"] {
+            font-size: 24px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+def draw_tile(col, icon, title, desc, btn_key, view_name):
+    """Helper to draw a standardized tool tile."""
+    with col:
+        with st.container(border=True):
+            st.write(f"### {icon} {title}")
+            st.caption(desc)
+            if st.button(f"Open {title}", key=btn_key, use_container_width=True):
+                st.session_state['current_view'] = view_name
+                st.rerun()
+
 def render_home():
     """
     Renders the Home page with service tiles for navigation.
     """
+    inject_custom_css()
+    
     st.title("Network Automation Portal")
-    st.markdown("Welcome to your central hub for network operations.")
+    st.info("👋 Welcome to your central hub for network operations and engineering.")
     st.divider()
     
-    # Row 1: 5 Columns
-    cols = st.columns(5)
+    # Tool Definition (Data-Driven)
+    tools = [
+        # Row 1: Core Ops
+        {"icon": "📡", "title": "Scanner", "desc": "Discovery & Inventory", "view": "scanner"},
+        {"icon": "🔐", "title": "SSL Check", "desc": "Cert Expiry Inspector", "view": "ssl_inspector"},
+        {"icon": "⚖️", "title": "Config Diff", "desc": "Compare configurations", "view": "config_diff"},
+        {"icon": "🌍", "title": "Global DNS", "desc": "Propagation Checker", "view": "dns_propagator"},
+        {"icon": "🔢", "title": "Subnet Calc", "desc": "VLSM & Planning", "view": "subnet_calc"},
+        
+        # Row 2: Analysis & optimization
+        {"icon": "⏱️", "title": "Latency", "desc": "HTTP/TCP Analysis", "view": "latency_analyzer"},
+        {"icon": "🏭", "title": "Config Gen", "desc": "Multi-Vendor Templates", "view": "config_gen"},
+        {"icon": "🛡️", "title": "Net Linter", "desc": "Config Best Practices", "view": "network_linter"},
+        {"icon": "🧠", "title": "Optimizer", "desc": "Route Summarization", "view": "route_optimizer"},
+        {"icon": "🗺️", "title": "Topology", "desc": "LLDP Visualizer", "view": "topology_mapper"},
+        
+        # Row 3: Investigation
+        {"icon": "🌎", "title": "BGP Look", "desc": "ASN & Peers Graph", "view": "bgp_inspector"},
+        {"icon": "🏷️", "title": "MAC Check", "desc": "OUI Vendor Lookup", "view": "mac_inspector"},
+        {"icon": "📂", "title": "Log Parser", "desc": "Extract IPs & Errors", "view": "log_extractor"},
+        {"icon": "🧮", "title": "TCP Calc", "desc": "BDP & Window Tuning", "view": "tcp_calculator"},
+        {"icon": "☁️", "title": "Azure IP", "desc": "Service Tag Ranger", "view": "azure_ranger"},
+        
+        # Row 4: Security
+        {"icon": "🛡️", "title": "Shodan", "desc": "Attack Surface Scan", "view": "shodan_scanner"},
+        {"icon": "🕵️‍♂️", "title": "Shadow IT", "desc": "Subdomain Finder", "view": "subdomain_finder"},
+        {"icon": "🔐", "title": "ZeroSSL", "desc": "Issue Certificates", "view": "zerossl_manager"},
+        {"icon": "🧹", "title": "Sanitizer", "desc": "Redact Passwords/IPs", "view": "config_sanitizer"},
+        # Filler for alignment if needed
+        
+        # Row 5: Utilities
+        {"icon": "💸", "title": "Azure Cost", "desc": "Egress Calculator", "view": "azure_cost"},
+        {"icon": "🔦", "title": "Optical", "desc": "dBm <-> mW Converter", "view": "optical_converter"},
+        {"icon": "➖", "title": "IP Subtract", "desc": "Exclude Subnets", "view": "ip_subtractor"},
+        {"icon": "🚛", "title": "MTU Calc", "desc": "Tunnel Overhead", "view": "mtu_calculator"},
+        {"icon": "🏭", "title": "Bulk Factory", "desc": "CSV Config Gen", "view": "bulk_factory"},
+        {"icon": "📞", "title": "VoIP Calc", "desc": "Bandwidth & Overhead", "view": "voip_calculator"},
+        {"icon": "🌐", "title": "IPv6 Master", "desc": "Expand/Compress/Type", "view": "ipv6_master"},
+        {"icon": "💸", "title": "Log Cost", "desc": "Data Ingest Estimator", "view": "log_cost_estimator"},
+        {"icon": "💾", "title": "Disk IOPS", "desc": "GP3/Azure Limit Calc", "view": "disk_calculator"},
+    ]
     
-    # 1. Network Scanner
-    with cols[0]:
-        with st.container(border=True):
-            st.write("📡")
-            st.subheader("Network Scanner")
-            st.write("Scan subnets to find devices, hostnames, and vendors.")
-            if st.button("Launch Scanner", key="btn_launch_scanner", use_container_width=True):
-                st.session_state['current_view'] = 'scanner'
-                st.rerun()
-
-    # 2. SSL Inspector
-    with cols[1]:
-        with st.container(border=True):
-            st.write("🔐")
-            st.subheader("SSL Inspector")
-            st.write("Check bulk SSL certificates for expiry and validity.")
-            if st.button("Launch Inspector", key="btn_launch_ssl", use_container_width=True):
-                 st.session_state['current_view'] = 'ssl_inspector'
-                 st.rerun()
-
-    # 3. Config Diff
-    with cols[2]:
-        with st.container(border=True):
-            st.write("⚖️")
-            st.subheader("Config Diff")
-            st.write("Compare configurations with side-by-side highlighting.")
-            if st.button("Launch Comparator", key="btn_launch_diff", use_container_width=True):
-                st.session_state['current_view'] = 'config_diff'
-                st.rerun()
-
-    # 4. Global DNS
-    with cols[3]:
-        with st.container(border=True):
-            st.write("🌍")
-            st.subheader("Global DNS")
-            st.write("Check propagation across Google, Cloudflare, and Quad9.")
-            if st.button("Launch DNS Checker", key="btn_launch_dns", use_container_width=True):
-                st.session_state['current_view'] = 'dns_propagator'
-                st.rerun()
-
-    # 5. Subnet Calc
-    with cols[4]:
-        with st.container(border=True):
-            st.write("🔢")
-            st.subheader("Subnet Calc")
-            st.write("Basic Calc.")
-            if st.button("Launch", key="btn_launch_subnet", use_container_width=True):
-                st.session_state['current_view'] = 'subnet_calc'
-                st.rerun()
-            st.write("Advance VLSM")
-            if st.button("Architect", key="btn_launch_vlsm", use_container_width=True):
-                st.session_state['current_view'] = 'vlsm_architect'
-                st.rerun()
-
-    # Row 2: 5 Columns (to keep width consistent)
-    st.write("") # Spacer
-    cols_row2 = st.columns(5)
+    # Grid Layout Logic
+    cols_per_row = 5
+    rows = [tools[i:i + cols_per_row] for i in range(0, len(tools), cols_per_row)]
     
-    # 6. Latency Analyzer (First column of second row)
-    with cols_row2[0]:
-        with st.container(border=True):
-            st.write("⏱️")
-            st.subheader("Latency Analyzer")
-            st.write("Analyze DNS, TCP connect, TTFB, and download timings.")
-            if st.button("Launch Analyzer", key="btn_launch_latency", use_container_width=True):
-                st.session_state['current_view'] = 'latency_analyzer'
-                st.rerun()
-
-    # 7. Config Generator (Second column of second row)
-    with cols_row2[1]:
-        with st.container(border=True):
-            st.write("🏭")
-            st.subheader("Config Gen")
-            st.write("Generate configs for Cisco, Juniper, and SONiC.")
-            if st.button("Launch Generator", key="btn_launch_gen", use_container_width=True):
-                st.session_state['current_view'] = 'config_gen'
-                st.rerun()
-
-    # 8. Network Linter (Third column of second row)
-    with cols_row2[2]:
-        with st.container(border=True):
-            st.write("🛡️")
-            st.subheader("Net Linter")
-            st.write("Scan configs for Telnet, MTU, and disabled links.")
-            if st.button("Launch Linter", key="btn_launch_linter", use_container_width=True):
-                st.session_state['current_view'] = 'network_linter'
-                st.rerun()
-
-    # 9. Route Optimizer (Fourth column of second row)
-    with cols_row2[3]:
-         with st.container(border=True):
-            st.write("🧠")
-            st.subheader("Optimizer")
-            st.write("Algorithmically summarize IPs into minimal CIDRs.")
-            if st.button("Launch Optimizer", key="btn_launch_opt", use_container_width=True):
-                st.session_state['current_view'] = 'route_optimizer'
-                st.rerun()
-
-    # 10. Topology Mapper (Fifth column of second row)
-    with cols_row2[4]:
-         with st.container(border=True):
-            st.write("🗺️")
-            st.subheader("Topology")
-            st.write("Visualize LLDP neighbors as a graph.")
-            if st.button("Launch Mapper", key="btn_launch_topo", use_container_width=True):
-                st.session_state['current_view'] = 'topology_mapper'
-                st.rerun()
-
-    # 11. BGP Inspector (First column of third row - or actually let's re-flow)
-    # To keep it balanced, let's just add a new row or squeeze it in.
-    # Let's add a 3rd Row for "External" tools.
+    for row_tools in rows:
+        cols = st.columns(cols_per_row)
+        for idx, tool in enumerate(row_tools):
+            draw_tile(
+                col=cols[idx],
+                icon=tool['icon'],
+                title=tool['title'],
+                desc=tool['desc'],
+                btn_key=f"btn_launch_{tool['view']}",
+                view_name=tool['view']
+            )
+        st.write("") # Spacer between rows
     
-    st.write("")
-    cols_row3 = st.columns(5)
-    
-    with cols_row3[0]:
-         with st.container(border=True):
-            st.write("🌎")
-            st.subheader("BGP Look")
-            st.write("Inspect ASN peers and prefixes.")
-            if st.button("Launch BGP", key="btn_launch_bgp", use_container_width=True):
-                st.session_state['current_view'] = 'bgp_inspector'
-                st.rerun()
 
-    # 12. MAC Inspector (Second column of third row)
-    with cols_row3[1]:
-         with st.container(border=True):
-            st.write("🏷️")
-            st.subheader("MAC Check")
-            st.write("Lookup Vendor by MAC Address.")
-            if st.button("Launch MAC", key="btn_launch_mac", use_container_width=True):
-                st.session_state['current_view'] = 'mac_inspector'
-                st.rerun()
-
-    # 13. Log Extractor (Third column of third row)
-    with cols_row3[2]:
-         with st.container(border=True):
-            st.write("📂")
-            st.subheader("Log Parser")
-            st.write("Extract IPs, Emails, and Errors.")
-            if st.button("Launch LOG", key="btn_launch_log", use_container_width=True):
-                st.session_state['current_view'] = 'log_extractor'
-                st.rerun()
-
-    # 14. TCP Calculator (Fourth column of third row)
-    with cols_row3[3]:
-         with st.container(border=True):
-            st.write("🧮")
-            st.subheader("TCP Calc")
-            st.write("BDP & Window Tuning.")
-            if st.button("Launch TCP", key="btn_launch_tcp", use_container_width=True):
-                st.session_state['current_view'] = 'tcp_calculator'
-                st.rerun()
-
-    # 15. Azure Ranger (Fifth column of third row)
-    with cols_row3[4]:
-         with st.container(border=True):
-            st.write("☁️")
-            st.subheader("Azure IP")
-            st.write("Service Tags to ACLs.")
-            if st.button("Launch Ranger", key="btn_launch_azure", use_container_width=True):
-                st.session_state['current_view'] = 'azure_ranger'
-                st.rerun()
-
-    # --- Row 4: Security & Recon ---
-    st.divider()
-    st.subheader("🕵️‍♂️ Security Reconnaissance")
-    cols_row4 = st.columns(5) # reusing 5 columns layout
-    
-    # 16. Shodan Scanner
-    with cols_row4[0]:
-        with st.container(border=True):
-            st.write("🛡️")
-            st.subheader("Shodan")
-            st.write("Attack Surface Scan.")
-            if st.button("Launch Scan", key="btn_launch_shodan", use_container_width=True):
-                 st.session_state['current_view'] = 'shodan_scanner'
-                 st.rerun()
-
-    # 17. Subdomain Finder
-    with cols_row4[1]:
-        with st.container(border=True):
-            st.write("🕵️‍♂️")
-            st.subheader("Subdomains")
-            st.write("Find Shadow IT.")
-            if st.button("Launch Finder", key="btn_launch_crt", use_container_width=True):
-                 st.session_state['current_view'] = 'subdomain_finder'
-                 st.rerun()
-
-    # 18. ZeroSSL Manager
-    with cols_row4[2]:
-        with st.container(border=True):
-            st.write("🔐")
-            st.subheader("ZeroSSL")
-            st.write("Manage Certificates.")
-            if st.button("Launch Manager", key="btn_launch_zerossl", use_container_width=True):
-                 st.session_state['current_view'] = 'zerossl_manager'
-                 st.rerun()
-
-    # --- Row 5: Utilities ---
-    st.divider()
-    st.subheader("🛠️ Utilities")
-    cols_row5 = st.columns(5)
-    
-    # 19. Azure Cost
-    with cols_row5[0]:
-        with st.container(border=True):
-            st.write("💸")
-            st.subheader("Azure Cost")
-            st.write("Egress Calc.")
-            if st.button("Launch", key="btn_launch_azure_cost", use_container_width=True):
-                 st.session_state['current_view'] = 'azure_cost'
-                 st.rerun()
-                 
-    # 20. Optical Converter
-    with cols_row5[1]:
-        with st.container(border=True):
-            st.write("🔦")
-            st.subheader("Optical")
-            st.write("dBm <-> mW.")
-            if st.button("Launch", key="btn_launch_optical", use_container_width=True):
-                 st.session_state['current_view'] = 'optical_converter'
-                 st.rerun()
-
-    # 21. IP Subtractor
-    with cols_row5[2]:
-        with st.container(border=True):
-            st.write("➖")
-            st.subheader("IP Sub")
-            st.write("Exclude Subnets.")
-            if st.button("Launch", key="btn_launch_ip_sub", use_container_width=True):
-                 st.session_state['current_view'] = 'ip_subtractor'
-                 st.rerun()
 
 def render_network_scanner():
     """
@@ -2027,6 +2294,20 @@ def main():
         render_optical_converter()
     elif st.session_state['current_view'] == 'ip_subtractor':
         render_ip_subtractor()
+    elif st.session_state['current_view'] == 'mtu_calculator':
+        render_mtu_calculator()
+    elif st.session_state['current_view'] == 'bulk_factory':
+        render_bulk_factory()
+    elif st.session_state['current_view'] == 'config_sanitizer':
+        render_config_sanitizer()
+    elif st.session_state['current_view'] == 'voip_calculator':
+        render_voip_calculator()
+    elif st.session_state['current_view'] == 'ipv6_master':
+        render_ipv6_master()
+    elif st.session_state['current_view'] == 'log_cost_estimator':
+        render_log_cost_estimator()
+    elif st.session_state['current_view'] == 'disk_calculator':
+        render_disk_calculator()
         
     # Global Features
     render_floating_ai_assistant()

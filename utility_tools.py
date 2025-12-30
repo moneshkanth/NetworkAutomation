@@ -116,3 +116,30 @@ def exclude_subnets(supernet_cidr, exclude_cidr):
 def parse_exclusion_generator(gen):
     """Helper to consume generator and return strings."""
     return [str(n) for n in gen]
+
+def calculate_mtu_overhead(phys_mtu, protocol_overhead):
+    """
+    Calculates Safe Tunnel MTU and TCP MSS.
+    
+    Args:
+        phys_mtu (int): The Physical Interface MTU (default 1500).
+        protocol_overhead (int): Bytes added by the tunnel header.
+        
+    Returns:
+        dict: Safe MTU, Recommended MSS, and breakdown.
+    """
+    safe_mtu = phys_mtu - protocol_overhead
+    # TCP/IP Headers = 40 bytes (20 IP + 20 TCP)
+    tcp_ip_headers = 40
+    mss = safe_mtu - tcp_ip_headers
+    
+    return {
+        "safe_mtu": safe_mtu,
+        "mss": mss,
+        "breakdown": {
+            "Physical MTU": phys_mtu,
+            "Tunnel Overhead": protocol_overhead,
+            "TCP/IP Headers": tcp_ip_headers,
+            "Payload (MSS)": mss
+        }
+    }

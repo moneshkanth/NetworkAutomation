@@ -1,5 +1,57 @@
 import jinja2
 import json
+import pandas as pd
+import zipfile
+import io
+
+def generate_bulk_configs(template_str, df):
+    """
+    Generates configs from a CSV DataFrame and zips them.
+    
+    Args:
+        template_str (str): The Jinja2 template.
+        df (pd.DataFrame): The CSV data.
+        
+    Returns:
+        tuple: (zip_bytes, preview_list)
+    """
+    preview = []
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        template = jinja2.Template(template_str)
+        
+        # Iterate over rows
+        for index, row in df.iterrows():
+            data = row.to_dict()
+            
+            # Render
+            try:
+                config_content = template.render(**data)
+                
+                # Determine Filename (use 'hostname' column if exists, else row index)
+                # Santize filename
+                if 'hostname' in data:
+                    filename = f"{data['hostname']}.txt"
+                else:
+                    filename = f"config_row_{index+1}.txt"
+                
+                # Add to Zip
+                zip_file.writestr(filename, config_content)
+                
+                # Add to preview (limit to first 3)
+                if len(preview) < 3:
+                     preview.append({"filename": filename, "content": config_content})
+                     
+            except Exception as e:
+                # Log error in content if render fails
+                err_msg = f"Error rendering row {index}: {str(e)}"
+                zip_file.writestr(f"error_row_{index}.txt", err_msg)
+                if len(preview) < 3:
+                    preview.append({"filename": f"error_{index}", "content": err_msg})
+
+    zip_buffer.seek(0)
+    return zip_buffer, preview
 
 def generate_configs(data):
     """
