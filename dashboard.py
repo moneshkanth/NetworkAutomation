@@ -460,6 +460,147 @@ def render_disk_calculator():
         through_norm = min(res['throughput_mbps'] / 1000, 1.0)
         st.progress(through_norm)
 
+from pcap_inspector import inspect_pcap
+
+def render_pcap_inspector():
+    """Renders the Wireshark-Lite (PCAP Inspector) tool."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Upload a .pcap file to analyze packets in the browser.")
+    
+    st.title("🦈 Wireshark-Lite")
+    st.markdown("Packet Trace Analysis in your browser.")
+    
+    uploaded_file = st.file_uploader("Upload PCAP File", type=['pcap', 'cap'])
+    
+    if uploaded_file is not None:
+        with st.spinner("Parsing Packets..."):
+            df = inspect_pcap(uploaded_file)
+            
+        if "Error" in df.columns:
+            st.error(df["Error"].iloc[0])
+        else:
+            st.success(f"Parsed {len(df)} packets.")
+            
+            # Display Statistics
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Packets", len(df))
+            c2.metric("Duration (s)", f"{df['Time'].max() - df['Time'].min():.2f}" if not df.empty else "0")
+            
+            # Protocol Distribution
+            if not df.empty and "Protocol" in df.columns:
+                proto_counts = df['Protocol'].value_counts()
+                c3.metric("Top Protocol", proto_counts.idxmax())
+                st.bar_chart(proto_counts)
+            
+            # Dataframe with filtering
+            st.subheader("Packet List")
+            st.dataframe(df, use_container_width=True)
+
+from compliance_engine import audit_config
+
+def render_compliance_engine():
+    """Renders the Golden Config Compliance Engine."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Audit configurations against Golden Rules (Regex).")
+    
+    st.title("📋 Golden Config Compliance")
+    st.markdown("Automated Configuration Auditing.")
+    
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.subheader("1. Define Rules (Optional)")
+        st.caption("Using default Golden Rules (SSHv2, No Telnet, Encryption). Custom rules coming soon.")
+    
+    with c2:
+        st.subheader("2. Upload Config")
+        uploaded_file = st.file_uploader("Upload Config (txt/cfg)", type=['txt', 'cfg', 'conf'])
+        config_text = ""
+        
+        if uploaded_file:
+            config_text = uploaded_file.getvalue().decode("utf-8")
+        else:
+            config_text = st.text_area("Or Paste Config Here", height=200)
+
+    if st.button("Run Audit"):
+        if not config_text.strip():
+            st.error("Please provide a configuration to audit.")
+        else:
+            res = audit_config(config_text)
+            
+            # Score
+            score = res['score']
+            color = "green" if score == 100 else "orange" if score > 70 else "red"
+            
+            st.divider()
+            col_score, col_details = st.columns([1, 2])
+            
+            with col_score:
+                st.metric("Compliance Score", f"{score:.0f}%")
+                if score == 100:
+                    st.balloons()
+            
+            with col_details:
+                st.progress(score / 100)
+                st.caption(f"Passed {res['passed_rules']} / {res['total_rules']} Rules")
+            
+            st.subheader("Audit Report")
+            
+            for item in res['details']:
+                if item['Status'] == 'Fail':
+                    st.error(f"❌ **{item['Rule']}**: {item['Message']}")
+                    with st.expander("View Regex Pattern"):
+                         st.code(item['Pattern'])
+                else:
+                    st.success(f"✅ **{item['Rule']}**: Compliant")
+
+from topology_visualizer import generate_topology
+
+def render_topology_visualizer():
+    """Renders the Network Topology Visualizer."""
+    with st.sidebar:
+        if st.button("← Back to Home"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+        st.divider()
+        st.info("Upload LLDP Neighbor CSV to generate a topology map.")
+    
+    st.title("🕸️ Network Topology Visualizer")
+    st.markdown("Visualize your network graph from LLDP data.")
+    
+    uploaded_file = st.file_uploader("Upload LLDP Data (CSV)", type=['csv'])
+    
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        
+        st.subheader("Data Preview")
+        st.dataframe(df.head(), use_container_width=True)
+        
+        if st.button("Generate Graph"):
+            dot_str = generate_topology(df)
+            
+            if dot_str and dot_str.startswith("Error"):
+                st.error(dot_str)
+            elif dot_str:
+                st.success("Graph Generated!")
+                st.divider()
+                st.graphviz_chart(dot_str, use_container_width=True)
+                
+                with st.expander("View DOT Source"):
+                    st.code(dot_str)
+    else:
+        st.info("Please upload a CSV with columns: `Source`, `Target`.")
+        with st.expander("Download Sample CSV"):
+            sample_csv = "Source,Target\nCore-Switch,Access-Switch-1\nCore-Switch,Access-Switch-2\nAccess-Switch-1,Printer-A\nAccess-Switch-2,Camera-B"
+            st.download_button("Download Sample", sample_csv, "topology_sample.csv", "text/csv")
+
 def render_config_comparator():
     # Load history state if clicked
     if 'restore_config_index' in st.session_state:
@@ -1893,83 +2034,67 @@ def inject_custom_css():
         </style>
     """, unsafe_allow_html=True)
 
-def draw_tile(col, icon, title, desc, btn_key, view_name):
-    """Helper to draw a standardized tool tile."""
+def draw_tool_card(col, tool):
+    """Draws a unified tool card."""
     with col:
         with st.container(border=True):
-            st.write(f"### {icon} {title}")
-            st.caption(desc)
-            if st.button(f"Open {title}", key=btn_key, use_container_width=True):
-                st.session_state['current_view'] = view_name
+            c_icon, c_text = st.columns([1, 4])
+            with c_icon:
+                st.markdown(f"<h1 style='text-align: center; margin: 0;'>{tool['icon']}</h1>", unsafe_allow_html=True)
+            with c_text:
+                st.subheader(tool['title'])
+                st.caption(tool['desc'])
+                
+            if st.button(f"Launch", key=f"btn_{tool['view']}", use_container_width=True):
+                st.session_state['current_view'] = tool['view']
                 st.rerun()
 
 def render_home():
     """
-    Renders the Home page with service tiles for navigation.
+    Renders the Home page with categorized service tiles.
     """
     inject_custom_css()
     
     st.title("Network Automation Portal")
-    st.info("👋 Welcome to your central hub for network operations and engineering.")
+    st.markdown("### 🚀 Central Command for NetOps & SRE")
+    
+    # 1. KPI / Status Row (Mockup for "Wow" factor)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Active Sessions", "42", "+3")
+    k2.metric("Network Health", "98.2%", "+0.1%")
+    k3.metric("Pending Audits", "5", "-2")
+    k4.metric("Tools Available", "48")
+    
+from tool_registry import get_tool_categories
+
+def render_home():
+    """
+    Renders the Home page with categorized service tiles.
+    """
+    inject_custom_css()
+    
+    st.title("Network Automation Portal")
+    st.markdown("### 🚀 Central Command for NetOps & SRE")
+    
+    # 1. KPI / Status Row (Mockup for "Wow" factor)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Active Sessions", "42", "+3")
+    k2.metric("Network Health", "98.2%", "+0.1%")
+    k3.metric("Pending Audits", "5", "-2")
+    k4.metric("Tools Available", "48")
+    
     st.divider()
-    
-    # Tool Definition (Data-Driven)
-    tools = [
-        # Row 1: Core Ops
-        {"icon": "📡", "title": "Scanner", "desc": "Discovery & Inventory", "view": "scanner"},
-        {"icon": "🔐", "title": "SSL Check", "desc": "Cert Expiry Inspector", "view": "ssl_inspector"},
-        {"icon": "⚖️", "title": "Config Diff", "desc": "Compare configurations", "view": "config_diff"},
-        {"icon": "🌍", "title": "Global DNS", "desc": "Propagation Checker", "view": "dns_propagator"},
-        {"icon": "🔢", "title": "Subnet Calc", "desc": "VLSM & Planning", "view": "subnet_calc"},
-        
-        # Row 2: Analysis & optimization
-        {"icon": "⏱️", "title": "Latency", "desc": "HTTP/TCP Analysis", "view": "latency_analyzer"},
-        {"icon": "🏭", "title": "Config Gen", "desc": "Multi-Vendor Templates", "view": "config_gen"},
-        {"icon": "🛡️", "title": "Net Linter", "desc": "Config Best Practices", "view": "network_linter"},
-        {"icon": "🧠", "title": "Optimizer", "desc": "Route Summarization", "view": "route_optimizer"},
-        {"icon": "🗺️", "title": "Topology", "desc": "LLDP Visualizer", "view": "topology_mapper"},
-        
-        # Row 3: Investigation
-        {"icon": "🌎", "title": "BGP Look", "desc": "ASN & Peers Graph", "view": "bgp_inspector"},
-        {"icon": "🏷️", "title": "MAC Check", "desc": "OUI Vendor Lookup", "view": "mac_inspector"},
-        {"icon": "📂", "title": "Log Parser", "desc": "Extract IPs & Errors", "view": "log_extractor"},
-        {"icon": "🧮", "title": "TCP Calc", "desc": "BDP & Window Tuning", "view": "tcp_calculator"},
-        {"icon": "☁️", "title": "Azure IP", "desc": "Service Tag Ranger", "view": "azure_ranger"},
-        
-        # Row 4: Security
-        {"icon": "🛡️", "title": "Shodan", "desc": "Attack Surface Scan", "view": "shodan_scanner"},
-        {"icon": "🕵️‍♂️", "title": "Shadow IT", "desc": "Subdomain Finder", "view": "subdomain_finder"},
-        {"icon": "🔐", "title": "ZeroSSL", "desc": "Issue Certificates", "view": "zerossl_manager"},
-        {"icon": "🧹", "title": "Sanitizer", "desc": "Redact Passwords/IPs", "view": "config_sanitizer"},
-        # Filler for alignment if needed
-        
-        # Row 5: Utilities
-        {"icon": "💸", "title": "Azure Cost", "desc": "Egress Calculator", "view": "azure_cost"},
-        {"icon": "🔦", "title": "Optical", "desc": "dBm <-> mW Converter", "view": "optical_converter"},
-        {"icon": "➖", "title": "IP Subtract", "desc": "Exclude Subnets", "view": "ip_subtractor"},
-        {"icon": "🚛", "title": "MTU Calc", "desc": "Tunnel Overhead", "view": "mtu_calculator"},
-        {"icon": "🏭", "title": "Bulk Factory", "desc": "CSV Config Gen", "view": "bulk_factory"},
-        {"icon": "📞", "title": "VoIP Calc", "desc": "Bandwidth & Overhead", "view": "voip_calculator"},
-        {"icon": "🌐", "title": "IPv6 Master", "desc": "Expand/Compress/Type", "view": "ipv6_master"},
-        {"icon": "💸", "title": "Log Cost", "desc": "Data Ingest Estimator", "view": "log_cost_estimator"},
-        {"icon": "💾", "title": "Disk IOPS", "desc": "GP3/Azure Limit Calc", "view": "disk_calculator"},
-    ]
-    
-    # Grid Layout Logic
-    cols_per_row = 5
-    rows = [tools[i:i + cols_per_row] for i in range(0, len(tools), cols_per_row)]
-    
-    for row_tools in rows:
-        cols = st.columns(cols_per_row)
-        for idx, tool in enumerate(row_tools):
-            draw_tile(
-                col=cols[idx],
-                icon=tool['icon'],
-                title=tool['title'],
-                desc=tool['desc'],
-                btn_key=f"btn_launch_{tool['view']}",
-                view_name=tool['view']
-            )
+
+    # Tool Registry
+    CATEGORIES = get_tool_categories()
+
+    # Render Categories
+    for cat_name, tools_list in CATEGORIES.items():
+        st.subheader(cat_name)
+        # Dynamic Columns based on count, max 4 wide
+        cols = st.columns(4)
+        for i, tool in enumerate(tools_list):
+            draw_tool_card(cols[i % 4], tool)
         st.write("") # Spacer between rows
     
 
@@ -2246,6 +2371,37 @@ def main():
     # Initialize session state for navigation
     if 'current_view' not in st.session_state:
         st.session_state['current_view'] = 'home'
+
+    # Sidebar Navigation "Fast Switcher"
+    CATEGORIES = get_tool_categories()
+    
+    # Flatten tools for selectbox
+    # dict: {"Tool Title": "view_name"}
+    tool_map = {"🏠 Home": "home"}
+    for cat, tools in CATEGORIES.items():
+        for tool in tools:
+            tool_map[f"{tool['icon']} {tool['title']}"] = tool['view']
+    
+    # We need to find the key for the current view value to set index
+    reversed_map = {v: k for k, v in tool_map.items()}
+    current_key = reversed_map.get(st.session_state['current_view'], "🏠 Home")
+    
+    with st.sidebar:
+        st.subheader("Fast Navigation")
+        selected_tool_key = st.selectbox(
+            "Jump to:",
+            list(tool_map.keys()),
+            index=list(tool_map.keys()).index(current_key) if current_key in tool_map else 0,
+            key="nav_selectbox"
+        )
+        
+        # If changed, update state (check if different to avoid rerun loops if possible, 
+        # but Streamlit handles key binding updates well)
+        if tool_map[selected_tool_key] != st.session_state['current_view']:
+            st.session_state['current_view'] = tool_map[selected_tool_key]
+            st.rerun()
+        
+        st.divider()
         
     # Render the appropriate view
     if st.session_state['current_view'] == 'home':
@@ -2308,6 +2464,12 @@ def main():
         render_log_cost_estimator()
     elif st.session_state['current_view'] == 'disk_calculator':
         render_disk_calculator()
+    elif st.session_state['current_view'] == 'pcap_inspector':
+        render_pcap_inspector()
+    elif st.session_state['current_view'] == 'compliance_engine':
+        render_compliance_engine()
+    elif st.session_state['current_view'] == 'topology_visualizer':
+        render_topology_visualizer()
         
     # Global Features
     render_floating_ai_assistant()

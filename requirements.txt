@@ -6,3 +6,5 @@ requests
 jinja2
 graphviz
 cryptography
+scapy
+networkx
