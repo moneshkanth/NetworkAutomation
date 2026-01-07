@@ -778,8 +778,7 @@ spec:
                 else:
                     st.success("✅ No violations detected.")
 
-                else:
-                    st.success("✅ No violations detected.")
+
 
 from azure_transit import analyze_transit_routing
 
