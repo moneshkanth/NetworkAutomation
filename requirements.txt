@@ -8,3 +8,4 @@ graphviz
 cryptography
 scapy
 networkx
+PyYAML

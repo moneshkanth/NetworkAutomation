@@ -5,7 +5,10 @@ import os
 import ipaddress
 from network_scanner import scan_network
 
+from styles import apply_custom_styles
+
 st.set_page_config(page_title="Network Scanner Dashboard", layout="wide")
+apply_custom_styles()
 
 import datetime
 
@@ -600,6 +603,236 @@ def render_topology_visualizer():
         with st.expander("Download Sample CSV"):
             sample_csv = "Source,Target\nCore-Switch,Access-Switch-1\nCore-Switch,Access-Switch-2\nAccess-Switch-1,Printer-A\nAccess-Switch-2,Camera-B"
             st.download_button("Download Sample", sample_csv, "topology_sample.csv", "text/csv")
+
+from bgp_simulator import RouteEntry, parse_route_map, simulate_route_map
+
+def render_bgp_simulator():
+    """Renders the BGP Policy-Map Simulator."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_bgp_sim"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+            
+    st.title("🕸️ BGP Policy-Map Simulator")
+    st.markdown("Dry-run your BGP Route Maps to verify filtering logic before deployment.")
+    
+    c1, c2 = st.columns([1, 1])
+    
+    with c1:
+        st.subheader("1. Route-Map Config")
+        default_rmap = """route-map RM_Inbound permit 10
+ match ip address prefix-list PL_Block_Private
+ set community 65000:666 additive
+ set local-preference 50
+route-map RM_Inbound permit 20
+ match as-path AS_Google
+ set community 65000:100 additive
+route-map RM_Inbound permit 30"""
+        rmap_text = st.text_area("Paste Route-Map (Cisco Syntax)", value=default_rmap, height=300)
+    
+    with c2:
+        st.subheader("2. Test Route Entry")
+        test_prefix = st.text_input("Prefix", "8.8.8.0/24")
+        test_aspath = st.text_input("AS-Path (Space separated)", "15169 2914")
+        test_comm = st.text_input("Communities (Space separated)", "65000:999")
+        
+        st.info("Simulates a route arriving and passing through the policy.")
+        
+        if st.button("🚀 Run Simulation", type="primary", use_container_width=True):
+            # 1. Parse Route Map
+            try:
+                parsed_maps = parse_route_map(rmap_text)
+                map_names = list(parsed_maps.keys())
+                if not map_names:
+                    st.warning("No valid route-map found in text.")
+                    return
+                
+                # Use the first route-map found
+                target_map_name = map_names[0]
+                clauses = parsed_maps[target_map_name]
+                
+                # 2. Build Entry
+                entry = RouteEntry(
+                    prefix=test_prefix,
+                    as_path=[int(x) for x in test_aspath.split() if x.isdigit()],
+                    communities=test_comm.split()
+                )
+                
+                original_data = entry.to_dict()
+                
+                # 3. Simulate
+                result_entry = simulate_route_map(entry, clauses)
+                
+                # 4. Results
+                st.divider()
+                st.subheader("Simulation Results")
+                
+                r1, r2 = st.columns(2)
+                with r1:
+                    st.metric("Final Decision", result_entry.action, delta="Permitted" if "PERMIT" in result_entry.action else "-Denied", delta_color="normal" if "PERMIT" in result_entry.action else "inverse")
+                
+                with r2:
+                    st.write("**Modified Attributes:**")
+                    final_dict = result_entry.to_dict()
+                    # Compare
+                    changes = []
+                    for k, v in final_dict.items():
+                        if k == "action": continue
+                        if v != original_data[k]:
+                            changes.append(f"**{k}**: `{original_data[k]}` ➝ `{v}`")
+                    
+                    if changes:
+                        for c in changes: st.write(c)
+                    else:
+                        st.caption("No attributes modified.")
+                
+                with st.expander("Execution Trace (Debug Log)", expanded=True):
+                    st.code("\n".join(result_entry.logs), language="text")
+
+            except Exception as e:
+                st.error(f"Simulation Error: {e}")
+
+                st.error(f"Simulation Error: {e}")
+
+from k8s_auditor import audit_k8s_manifest
+
+def render_k8s_auditor():
+    """Renders the Kubernetes Resource Auditor."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_k8s"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+            
+    st.title("☸️ Kubernetes Resource Auditor")
+    st.markdown("Scan your K8s Manifests (YAML) for SRE best practices (Reliability, Efficiency, Security).")
+    
+    # Preset sample
+    default_yaml = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risky-nginx
+spec:
+  template:
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        securityContext:
+          privileged: true
+"""
+    
+    c1, c2 = st.columns([1, 1])
+    
+    with c1:
+        st.subheader("Input Manifest")
+        tab1, tab2 = st.tabs(["📝 Paste YAML", "📂 Upload File"])
+        
+        yaml_input = None
+        
+        with tab1:
+            yaml_text = st.text_area("Paste YAML Here", value=default_yaml, height=400)
+            if yaml_text:
+                yaml_input = yaml_text
+                
+        with tab2:
+            uploaded = st.file_uploader("Upload .yaml file", type=['yaml', 'yml'])
+            if uploaded:
+                yaml_input = uploaded.getvalue().decode("utf-8")
+                
+    with c2:
+        st.subheader("Audit Report")
+        
+        if st.button("🚀 Audit Manifest", type="primary", use_container_width=True):
+            if not yaml_input:
+                st.warning("Please provide YAML input.")
+            else:
+                score, findings = audit_k8s_manifest(yaml_input)
+                
+                # Visual Score
+                st.metric("Stability Score", f"{score}/100")
+                if score == 100:
+                    st.success("Perfect Score! No issues found.")
+                elif score > 80:
+                    st.progress(score/100, text="Good")
+                elif score > 50:
+                    st.progress(score/100, text="Needs Improvement")
+                else:
+                    st.progress(score/100, text="Critical Issues")
+                    
+                st.divider()
+                
+                if findings:
+                    st.write("**Findings:**")
+                    for f in findings:
+                        sev = f['severity']
+                        msg = f['msg']
+                        
+                        if sev == 'critical':
+                            st.error(f"💥 **CRITICAL**: {msg}")
+                        elif sev == 'high':
+                            st.warning(f"⚠️ **HIGH**: {msg}")
+                        elif sev == 'medium':
+                            st.info(f"ℹ️ **MEDIUM**: {msg}")
+                        else:
+                            st.caption(f"🔧 LOW: {msg}")
+                else:
+                    st.success("✅ No violations detected.")
+
+                else:
+                    st.success("✅ No violations detected.")
+
+from azure_transit import analyze_transit_routing
+
+def render_azure_transit():
+    """Renders the Azure Transit Routing Visualizer."""
+    with st.sidebar:
+        if st.button("← Back to Home", key="btn_back_az_transit"):
+            st.session_state['current_view'] = 'home'
+            st.rerun()
+            
+    st.title("☁️ Azure Transit Routing Visualizer")
+    st.markdown("Visualize Hub-and-Spoke connectivity and identify broken transitive paths.")
+    
+    st.info("💡 Tip: Azure Peering is non-transitive. Spoke A cannot reach Spoke B unless traffic flows through a Gateway/NVA in the Hub.")
+    
+    # Inputs
+    c1, c2 = st.columns([1, 1])
+    
+    with c1:
+        st.subheader("Define Topology")
+        st.caption("Enter peering pairs (Source, Target). One per line.")
+        default_pairs = "Hub-VNet, Spoke-App-A\nHub-VNet, Spoke-DB-B\nHub-VNet, OnPrem-VPN\nSpoke-App-A, Spoke-DB-B"
+        pairs_input = st.text_area("Peering Relationships", value=default_pairs, height=200)
+    
+    with c2:
+        st.subheader("Analysis")
+        if st.button("🕸️ Build Graph & Analyze", type="primary", use_container_width=True):
+            # Parse pairs
+            pairs = []
+            for line in pairs_input.splitlines():
+                if "," in line:
+                    parts = line.split(",")
+                    u = parts[0].strip()
+                    v = parts[1].strip()
+                    if u and v:
+                        pairs.append((u, v))
+            
+            if not pairs:
+                st.warning("No valid pairs found.")
+            else:
+                dot_src, msgs = analyze_transit_routing(pairs)
+                
+                tab1, tab2 = st.tabs(["📊 Graph Visualization", "📋 Route Analysis"])
+                
+                with tab1:
+                    st.graphviz_chart(dot_src, use_container_width=True)
+                    
+                with tab2:
+                    for m in msgs:
+                        if "✅" in m:
+                            st.success(m)
+                        else:
+                            st.error(m)
 
 def render_config_comparator():
     # Load history state if clicked
@@ -2360,14 +2593,8 @@ def render_floating_ai_assistant():
             st.session_state.messages.append({"role": "assistant", "content": response})
 
 def main():
-    # Page Config must be the first Streamlit command
-    st.set_page_config(
-        page_title="Network Automation Portal",
-        page_icon="📡",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-
+    # Page Config is already set at the top level
+    
     # Initialize session state for navigation
     if 'current_view' not in st.session_state:
         st.session_state['current_view'] = 'home'
@@ -2386,22 +2613,23 @@ def main():
     reversed_map = {v: k for k, v in tool_map.items()}
     current_key = reversed_map.get(st.session_state['current_view'], "🏠 Home")
     
+    def on_nav_change():
+        """Callback for selectbox change"""
+        new_key = st.session_state.nav_selectbox
+        st.session_state['current_view'] = tool_map[new_key]
+    
     with st.sidebar:
         st.subheader("Fast Navigation")
-        selected_tool_key = st.selectbox(
+        # Use on_change to update state ONLY when user interacts
+        st.selectbox(
             "Jump to:",
             list(tool_map.keys()),
             index=list(tool_map.keys()).index(current_key) if current_key in tool_map else 0,
-            key="nav_selectbox"
+            key="nav_selectbox",
+            on_change=on_nav_change
         )
         
-        # If changed, update state (check if different to avoid rerun loops if possible, 
-        # but Streamlit handles key binding updates well)
-        if tool_map[selected_tool_key] != st.session_state['current_view']:
-            st.session_state['current_view'] = tool_map[selected_tool_key]
-            st.rerun()
-        
-        st.divider()
+    st.divider()
         
     # Render the appropriate view
     if st.session_state['current_view'] == 'home':
@@ -2470,6 +2698,12 @@ def main():
         render_compliance_engine()
     elif st.session_state['current_view'] == 'topology_visualizer':
         render_topology_visualizer()
+    elif st.session_state['current_view'] == 'bgp_simulator':
+        render_bgp_simulator()
+    elif st.session_state['current_view'] == 'k8s_auditor':
+        render_k8s_auditor()
+    elif st.session_state['current_view'] == 'azure_transit':
+        render_azure_transit()
         
     # Global Features
     render_floating_ai_assistant()

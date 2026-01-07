@@ -10,6 +10,7 @@ def get_tool_categories():
             {"icon": "🌍", "title": "Global DNS", "desc": "Propagation Checker", "view": "dns_propagator"},
         ],
         "⚙️ Configuration Operations": [
+            {"icon": "🕸️", "title": "BGP Sim", "desc": "Route-Map Dry Run", "view": "bgp_simulator"},
             {"icon": "⚖️", "title": "Config Diff", "desc": "Compare configurations", "view": "config_diff"},
             {"icon": "🏭", "title": "Config Gen", "desc": "Jinja2 Templates", "view": "config_gen"},
             {"icon": "🏭", "title": "Bulk Factory", "desc": "CSV Config Gen", "view": "bulk_factory"},
@@ -25,6 +26,8 @@ def get_tool_categories():
             {"icon": "📂", "title": "Log Parser", "desc": "Extract IPs & Errors", "view": "log_extractor"},
         ],
         "☁️ Cloud & Planning": [
+            {"icon": "🕸️", "title": "Az Transit", "desc": "Hub-Spoke Routing", "view": "azure_transit"},
+            {"icon": "☸️", "title": "K8s Audit", "desc": "Resource & Security Check", "view": "k8s_auditor"},
             {"icon": "☁️", "title": "Azure IP", "desc": "Service Tag Ranger", "view": "azure_ranger"},
             {"icon": "💰", "title": "Azure Cost", "desc": "VM Pricing Calc", "view": "azure_cost"},
             {"icon": "💸", "title": "Log Cost", "desc": "Observability Price", "view": "log_cost_estimator"},
